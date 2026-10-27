@@ -1,0 +1,63 @@
+# Builds the whole TraceJVM runtime (TeaVM javac + b-jvm VM + JDK 23 runtime images) from this commit and publishes it
+# as a GitHub release, so the browser runtime and its corresponding source (this commit) are always paired (AGPL-3.0).
+name: Build runtime
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.22.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Build tools (ninja)
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Cache the pinned toolchain and downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/frozen-toolchain
+            .cache/temurin-23-linux
+            .cache/runtime-sources
+            .cache/teavm-javac
+          key: tracejvm-toolchain-${{ hashFiles('runtime/manifest.json', 'compiler/teavm-javac/**', 'scripts/build-teavm-javac.sh') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Bootstrap JDK 23 + Emscripten 4.0.2, build javac and the runtime
+        run: node scripts/bootstrap-toolchain.mjs --build
+      - run: pnpm build
+      - name: Prepare the runtime release tree
+        id: release
+        run: |
+          node scripts/prepare-runtime-release.mjs | tee release-info.json
+          echo "dir=$(node -e 'console.log(require("./release-info.json").outputDirectory)')" >> "$GITHUB_OUTPUT"
+          echo "prefix=$(node -e 'console.log(require("./release-info.json").relativePrefix)')" >> "$GITHUB_OUTPUT"
+      - name: Pack
+        run: |
+          tar -czf tracejvm-runtime.tar.gz -C "${{ steps.release.outputs.dir }}" .
+          cp "${{ steps.release.outputs.dir }}/release.json" release.json
+          sha256sum tracejvm-runtime.tar.gz release.json | tee SHA256SUMS
+      - name: Publish as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" tracejvm-runtime.tar.gz release.json release-info.json SHA256SUMS \
+            --target "${{ github.sha }}" --prerelease \
+            --title "Runtime build ${{ github.run_number }} (${GITHUB_SHA::7})" \
+            --notes "TraceJVM runtime built from commit ${{ github.sha }} of this repository (its corresponding source, AGPL-3.0). Release prefix: ${{ steps.release.outputs.prefix }}."
