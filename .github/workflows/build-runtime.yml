@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -39,9 +39,15 @@ jobs:
             .cache/teavm-javac
           key: tracejvm-toolchain-${{ hashFiles('runtime/manifest.json', 'compiler/teavm-javac/**', 'scripts/build-teavm-javac.sh') }}
       - run: pnpm install --frozen-lockfile
+      # The build output goes to build.log as well, published with a failed build (Actions logs need a login to read).
       - name: Bootstrap JDK 23 + Emscripten 4.0.2, build javac and the runtime
-        run: node scripts/bootstrap-toolchain.mjs --build
-      - run: pnpm build
+        run: |
+          set -o pipefail
+          node scripts/bootstrap-toolchain.mjs --build 2>&1 | tee build.log
+      - name: Build the library and workers
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee -a build.log
       - name: Prepare the runtime release tree
         id: release
         run: |
@@ -61,3 +67,11 @@ jobs:
             --target "${{ github.sha }}" --prerelease \
             --title "Runtime build ${{ github.run_number }} (${GITHUB_SHA::7})" \
             --notes "TraceJVM runtime built from commit ${{ github.sha }} of this repository (its corresponding source, AGPL-3.0). Release prefix: ${{ steps.release.outputs.prefix }}."
+      - name: Publish the log of a failed build
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          touch build.log
+          gh release create "build-${{ github.run_number }}-failed" build.log --target "${{ github.sha }}" --prerelease \
+            --title "Failed runtime build ${{ github.run_number }} (${GITHUB_SHA::7})" --notes "Build log of a failed build."
