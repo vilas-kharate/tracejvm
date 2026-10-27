@@ -22,6 +22,11 @@ THIRD_PARTY_NOTICES.md).
   `Files.newBufferedReader`, `new Scanner(File)` failed); `FileInputStream.length0` / `position0` added
   (`readAllBytes`, `readNBytes`, `skip`, `transferTo`) (`natives/share/sun/nio/fs/UnixNativeDispatcher.c`,
   `natives/share/java/io/FileInputStream.c`).
+- 2026-10-28: an exception that ends `Thread.run` of a started thread is handed to
+  `Thread.dispatchUncaughtException` on that thread before it ends (as HotSpot's `JavaThread::exit`), so uncaught
+  exception handlers run and the default one prints `Exception in thread "..."`; it was dropped silently
+  (`vm/roundrobin_scheduler.c`).
+- 2026-10-28: the runtime build workflow puts the repository's TypeScript first on PATH (emcc's `--emit-tsd`).
 - 2026-10-28: assertions are off by default, as in the JDK (`Class.desiredAssertionStatus0` returned true);
   `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`).
 - 2026-10-28: `Class.getModifiers()` of a member class comes from its InnerClasses entry (so `static`, `private`,

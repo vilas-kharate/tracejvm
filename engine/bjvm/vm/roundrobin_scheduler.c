@@ -7,6 +7,7 @@
 typedef struct {
   call_interpreter_t call;
   execution_record *record;
+  bool uncaught_dispatched; // this call was replaced by Thread.dispatchUncaughtException (see rr_scheduler_step)
 } pending_call;
 
 typedef struct {
@@ -246,6 +247,28 @@ scheduler_status_t rr_scheduler_step(rr_scheduler *scheduler) {
   future_t fut = call_interpreter(&call->call);
 
   if (fut.status == FUTURE_READY) {
+    // An exception that ended Thread.run of a started thread goes to Thread.dispatchUncaughtException on the same
+    // thread before the thread ends, as in HotSpot's JavaThread::exit: the handler runs (the default one prints
+    // `Exception in thread "..."`) and join() returns after it. It was dropped silently (Shiklo fork, 2026-10-28).
+    obj_header *uncaught = thread->current_exception;
+    if (uncaught && !call->uncaught_dispatched && thread->thread_obj && call->call.args.args &&
+        call->call.args.args[0].obj == (obj_header *)thread->thread_obj) {
+      cp_method *dispatch = method_lookup(((obj_header *)thread->thread_obj)->descriptor,
+                                          STR("dispatchUncaughtException"), STR("(Ljava/lang/Throwable;)V"), true, false);
+      if (dispatch) {
+        stack_value *args = calloc(2, sizeof(stack_value));
+        args[0].obj = (obj_header *)thread->thread_obj;
+        args[1].obj = uncaught;
+        thread->current_exception = nullptr;
+        free(call->call.args.args);
+        call->call = (call_interpreter_t){{thread, dispatch, args}};
+        call->uncaught_dispatched = true;
+        return SCHEDULER_RESULT_MORE;
+      }
+    }
+    if (call->uncaught_dispatched) {
+      thread->current_exception = nullptr; // an exception thrown by the handler itself is ignored, as in HotSpot
+    }
     execution_record *rec = call->record;
     rec->status = SCHEDULER_RESULT_DONE;
     rec->returned = call->call._result;
