@@ -30,6 +30,9 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: the runtime images carry `jdk.localedata` for en, es, pt, de, fr, ja, hi (jlink `--include-locales`),
+  so `Locale.GERMANY`, `Locale.FRANCE` … format numbers, dates and currencies as the JDK does (they fell back to
+  English).
 - 2026-10-28: the runtime build workflow puts the repository's TypeScript first on PATH (emcc's `--emit-tsd`).
 - 2026-10-28: assertions are off by default, as in the JDK (`Class.desiredAssertionStatus0` returned true);
   `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`).

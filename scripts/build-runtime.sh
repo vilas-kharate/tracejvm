@@ -130,16 +130,20 @@ javac \
   --release 23 --enable-preview \
   -d "$build_root/platform-descriptor" \
   "$repo_root/scripts/java/PlatformDescriptor.java"
+# The locales of the runtime images: the languages of the site (each with its regional variants, e.g. de-DE, pt-BR,
+# en-IN); English and the root locale are always kept.
+locales="en,es,pt,de,fr,ja,hi"
 runtime_modules_for_profile() {
   case "$1" in
+    # jdk.localedata: number, date and currency formats beyond English, limited by jlink to $locales (Shiklo fork).
     core)
-      echo "java.base"
+      echo "java.base,jdk.localedata"
       ;;
     server)
-      echo "java.base,java.instrument,java.logging,java.management,java.naming,java.net.http,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.management,jdk.unsupported,jdk.zipfs"
+      echo "java.base,java.instrument,java.logging,java.management,java.naming,java.net.http,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.localedata,jdk.management,jdk.unsupported,jdk.zipfs"
       ;;
     spring-server)
-      echo "java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.management,jdk.unsupported,jdk.zipfs"
+      echo "java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.localedata,jdk.management,jdk.unsupported,jdk.zipfs"
       ;;
     *)
       echo "Unknown TraceJVM runtime profile: $1" >&2
@@ -159,6 +163,7 @@ for profile in core server spring-server; do
   jlink \
     --module-path "$linux_home/jmods" \
     --add-modules "$profile_modules" \
+    --include-locales="$locales" \
     --output "$profile_build_root/image" \
     --no-header-files \
     --no-man-pages \
