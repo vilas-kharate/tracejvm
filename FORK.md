@@ -30,6 +30,10 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: name lookup and network interfaces (`natives/share/java/net/InetAddressImpl.c`, new): "localhost" is
+  127.0.0.1, other names are an UnknownHostException (there is no DNS in a browser tab), NetworkInterface reports
+  none. The natives were missing, so `InetAddress.getByName("localhost")` aborted the VM and `UUID.randomUUID()` /
+  `SecureRandom` failed in `NetworkInterface.init`.
 - 2026-10-28: the runtime images carry `jdk.localedata` for en, es, pt, de, fr, ja, hi (jlink `--include-locales`),
   so `Locale.GERMANY`, `Locale.FRANCE` … format numbers, dates and currencies as the JDK does (they fell back to
   English).
