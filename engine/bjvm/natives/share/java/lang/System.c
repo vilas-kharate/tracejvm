@@ -8,6 +8,9 @@
 #include <sys/time.h>
 #define USE_SYS_TIME
 #endif
+#ifdef EMSCRIPTEN
+#include <emscripten/html5.h> // emscripten_date_now (wall clock)
+#endif
 
 DECLARE_NATIVE("java/lang", System, mapLibraryName, "(Ljava/lang/String;)Ljava/lang/String;") {
   struct native_String *orig_name = (struct native_String *)args[0].handle->obj;
