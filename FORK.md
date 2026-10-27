@@ -16,6 +16,12 @@ THIRD_PARTY_NOTICES.md).
   started, so programs saw 1970) and `VM.getNanoTimeAdjustment` returned 0 (`Instant.now()` never moved); both now
   read the time of day (`Date.now()`), `System.nanoTime()` stays monotonic
   (`natives/share/java/lang/System.c`, `natives/share/sun/misc/VM.c`).
+- 2026-10-28: `scripts/bootstrap-toolchain.mjs` puts the pinned JDK 23 first on PATH (the build host's own Java was
+  used by `build-runtime.sh` before).
+- 2026-10-28: NIO reads return IOStatus.EOF (-1) at the end of a file, as the JDK (`Files.readAllLines`,
+  `Files.newBufferedReader`, `new Scanner(File)` failed); `FileInputStream.length0` / `position0` added
+  (`readAllBytes`, `readNBytes`, `skip`, `transferTo`) (`natives/share/sun/nio/fs/UnixNativeDispatcher.c`,
+  `natives/share/java/io/FileInputStream.c`).
 - 2026-10-28: assertions are off by default, as in the JDK (`Class.desiredAssertionStatus0` returned true);
   `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`).
 - 2026-10-28: `Class.getModifiers()` of a member class comes from its InnerClasses entry (so `static`, `private`,
