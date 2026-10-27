@@ -9,6 +9,10 @@ THIRD_PARTY_NOTICES.md).
 - Changes made in this fork (fixes to the VM, its natives, the compiler build and the runtime images) are listed
   below with their date. Fixes that help everyone are offered back to TraceJVM.
 
+- `shiklo/checklist/` is the Java checklist of code.shiklo.com (one program per row of the full-language checklist,
+  compared with the exact output of a real JDK) with the page's engine glue; each build runs it and adds
+  `checklist-report.txt` to its release.
+
 ## Changes
 
 - 2026-10-28: added the runtime build workflow and this file.

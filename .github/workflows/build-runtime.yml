@@ -71,6 +71,18 @@ jobs:
             --target "${{ github.sha }}" --prerelease \
             --title "Runtime build ${{ github.run_number }} (${GITHUB_SHA::7})" \
             --notes "TraceJVM runtime built from commit ${{ github.sha }} of this repository (its corresponding source, AGPL-3.0). Release prefix: ${{ steps.release.outputs.prefix }}."
+      # The Shiklo Java checklist (shiklo/checklist): every row compared with the exact output of a real JDK, on the
+      # runtime just built; the report is added to the release.
+      - name: Run the Java checklist on this runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          mkdir -p shiklo/checklist/vendor
+          ln -s "${{ steps.release.outputs.dir }}" shiklo/checklist/vendor/runtime
+          node shiklo/checklist/run.mjs 900 > checklist-report.txt 2>&1 || true
+          grep -E '^INFO .* rows pass' checklist-report.txt || tail -20 checklist-report.txt
+          gh release upload "build-${{ github.run_number }}" checklist-report.txt
       - name: Publish the log of a failed build
         if: failure()
         env:

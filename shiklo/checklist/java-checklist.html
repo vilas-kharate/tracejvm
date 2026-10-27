@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Java checklist: every row of docs/JAVA_CHECKLIST.md</title></head>
+<body><pre id="out"></pre>
+
+<!-- One program per checklist row (docs/JAVA_CHECKLIST.md). The expected output is what the JDK prints (worked out by
+     hand; HashMap order from the String hash codes, Random from its specified algorithm). data-input: lines typed,
+     separated by |; data-files: project files (JSON); data-code: exit code (default 0); data-err: start of stderr;
+     data-bug: the TraceJVM bug number it shows (still listed as FAIL). Local PoC page:
+       dart scripts/isolated-server.dart --port 8097  →  http://localhost:8097/__tests/poc/java-checklist.html[?only=A2,B9] -->
+
+<script type="text/x-java" data-id="A1" data-name="Program structure: two classes in one file, args">
+class Helper { static String twice(String s) { return s + s; } }
+public class Main { public static void main(String[] args) { System.out.println(Helper.twice("ab") + " " + args.length); } }
+</script>
+<script type="text/plain" data-out="A1">
+abab 0
+</script>
+
+<script type="text/x-java" data-id="A2" data-name="Lexical: literals, escapes, comments, text blocks">
+public class Main {
+    /** Javadoc comment */
+    public static void main(String[] args) {
+        int dec = 1_000_000, hex = 0xFF, oct = 017, bin = 0b1010; // line comment
+        long big = 9_000_000_000L; /* block comment */
+        float f = 1.5f; double d = 2.5e3;
+        char c = 'A', tab = '\t', uni = 'A', quote = '\'';
+        System.out.println(dec + " " + hex + " " + oct + " " + bin + " " + big);
+        System.out.println(f + " " + d + " " + c + uni + quote + (int) tab);
+        System.out.println("line1\nline2 \"quoted\" back\\slash");
+        String s = """
+            Hello,
+              "World"\
+             !
+            """;
+        System.out.print(s);
+    }
+}
+</script>
+<script type="text/plain" data-out="A2">
+1000000 255 15 10 9000000000
+1.5 2500.0 AA'9
+line1
+line2 "quoted" back\slash
+Hello,
+  "World" !
+</script>
+
+<script type="text/x-java" data-id="A3" data-name="Primitive types: ranges, casts, overflow, char arithmetic, NaN / Infinity">
+public class Main {
+    public static void main(String[] a) {
+        System.out.println(Byte.MIN_VALUE + " " + Byte.MAX_VALUE + " " + Short.MAX_VALUE + " " + Integer.MIN_VALUE + " " + Long.MAX_VALUE);
+        byte b = (byte) 200; short s = (short) 70000; int i = (int) 3.99; long l = Integer.MAX_VALUE + 1L;
+        System.out.println(b + " " + s + " " + i + " " + l);
+        char c = 'a'; c += 2; int code = 'A' + 1;
+        System.out.println(c + " " + code + " " + (char) code + " " + (int) 'z');
+        System.out.println(0.1f + 0.2f);
+        System.out.println(1.0 / 0 + " " + -1.0 / 0 + " " + 0.0 / 0 + " " + (0.0 == -0.0) + " " + Double.compare(0.0, -0.0));
+        System.out.println(Float.MAX_VALUE + " " + Double.MIN_VALUE + " " + (long) 1e19 + " " + (int) Double.NaN);
+        boolean t = true; System.out.println(t && !false);
+    }
+}
+</script>
+<script type="text/plain" data-out="A3">
+-128 127 32767 -2147483648 9223372036854775807
+-56 4464 3 2147483648
+c 66 B 122
+0.3
+Infinity -Infinity NaN true 1
+3.4028235E38 4.9E-324 9223372036854775807 0
+true
+</script>
+
+<script type="text/x-java" data-id="A4" data-name="Variables: default values, var, scope, final, effectively final">
+public class Main {
+    static int count; static String name; static boolean flag; static double rate; static char ch;
+    static final double PI2 = Math.PI * 2;
+    int instanceField = 7;
+    public static void main(String[] a) {
+        System.out.println(count + " " + name + " " + flag + " " + rate + " " + (int) ch);
+        var list = new java.util.ArrayList<String>(); list.add("x");
+        var n = 10; var text = "hi";
+        { int inner = 5; n += inner; }
+        final int k = 3;
+        Runnable r = () -> System.out.println("k=" + k + " n-local copy");
+        r.run();
+        System.out.println(n + " " + text + " " + list + " " + new Main().instanceField + " " + String.format("%.4f", PI2));
+    }
+}
+</script>
+<script type="text/plain" data-out="A4">
+0 null false 0.0 0
+k=3 n-local copy
+15 hi [x] 7 6.2832
+</script>
+
+<script type="text/x-java" data-id="A5" data-name="Operators: arithmetic, ++, compound casts, short-circuit, bitwise, shifts, precedence">
+public class Main {
+    static boolean t(String s) { System.out.print(s); return true; }
+    static boolean f(String s) { System.out.print(s); return false; }
+    public static void main(String[] a) {
+        System.out.println(7 / 2 + " " + 7 % 3 + " " + -7 / 2 + " " + -7 % 3 + " " + 7.0 / 2 + " " + 5.5 % 2);
+        int i = 5; int j = i++ + ++i; System.out.println(i + " " + j);
+        byte b = 10; b += 300; System.out.println(b);
+        System.out.println((f("a") && t("b")) + " " + (t("c") || f("d")) + " " + (f("e") & t("f")));
+        System.out.println((6 & 3) + " " + (6 | 3) + " " + (6 ^ 3) + " " + (~6) + " " + (1 << 10) + " " + (-16 >> 2) + " " + (-16 >>> 28));
+        int x = 10; String r = x > 5 ? "big" : "small"; System.out.println(r + " " + (2 + 3 * 4 - 6 / 2) + " " + 1 + 2 + " " + (1 + 2));
+        System.out.println(Math.floorMod(-7, 3) + " " + Math.floorDiv(-7, 2) + " " + Integer.MAX_VALUE * 2);
+    }
+}
+</script>
+<script type="text/plain" data-out="A5">
+3 1 -3 -1 3.5 1.5
+7 12
+54
+aceffalse true false
+2 7 5 -7 1024 -4 15
+big 11 12 3
+2 -4 -2
+</script>
+
+<script type="text/x-java" data-id="A6" data-name="Control flow: fall-through switch, switch expressions, pattern switch, loops, labels">
+public class Main {
+    record Rect(double w, double h) {}
+    static String describe(Object o) {
+        return switch (o) {
+            case null -> "null!";
+            case Integer n when n > 100 -> "big int " + n;
+            case Integer n -> "int " + n;
+            case String s -> "text of " + s.length();
+            case Rect(double w, double h) when w == h -> "square " + w;
+            case Rect(var w, var h) -> "rect " + w + "x" + h;
+            default -> "other " + o.getClass().getSimpleName();
+        };
+    }
+    public static void main(String[] args) {
+        int day = 3;
+        switch (day) { case 1: System.out.print("one"); case 3: System.out.print("three"); case 4: System.out.print(",four"); break; default: System.out.print("other"); }
+        System.out.println();
+        String kind = switch (day) { case 1, 7 -> "weekend"; case 2, 3, 4, 5, 6 -> { String t = "week"; yield t + "day"; } default -> throw new IllegalStateException(); };
+        System.out.println(kind);
+        for (Object o : new Object[] {7, 500, "hello", new Rect(2, 2), new Rect(2, 3), 4.5, null}) System.out.println(describe(o));
+        int i = 0; while (i < 3) i++; do { i += 10; } while (i < 5);
+        System.out.println(i);
+        outer:
+        for (int r = 0; r < 3; r++) { for (int c = 0; c < 3; c++) { if (c == 2) continue outer; if (r == 2) break outer; System.out.print(r + "" + c + ";"); } }
+        System.out.println();
+        int sum = 0; for (int k = 10; k > 0; k -= 3) sum += k; System.out.println(sum);
+    }
+}
+</script>
+<script type="text/plain" data-out="A6">
+three,four
+weekday
+int 7
+big int 500
+text of 5
+square 2.0
+rect 2.0x3.0
+other Double
+null!
+13
+00;01;10;11;
+22
+</script>
+
+<script type="text/x-java" data-id="A7" data-name="Arrays: 2-D, jagged, Arrays utilities, varargs, ArrayStoreException">
+import java.util.*;
+public class Main {
+    static int sum(int... v) { int s = 0; for (int x : v) s += x; return s; }
+    public static void main(String[] a) {
+        int[] nums = {5, 3, 9, 1};
+        int[][] grid = new int[2][3]; grid[1][2] = 7;
+        int[][] jag = {{1}, {2, 3}, {4, 5, 6}};
+        System.out.println(nums.length + " " + Arrays.toString(nums) + " " + Arrays.deepToString(grid) + " " + jag[2].length);
+        int[] copy = Arrays.copyOf(nums, 6); Arrays.sort(nums);
+        System.out.println(Arrays.toString(nums) + " " + Arrays.toString(copy) + " " + Arrays.binarySearch(nums, 5));
+        int[] filled = new int[3]; Arrays.fill(filled, 4);
+        System.out.println(Arrays.equals(filled, new int[] {4, 4, 4}) + " " + (filled == filled.clone()) + " " + sum() + " " + sum(1, 2, 3));
+        Object[] objs = new String[2];
+        try { objs[0] = 1; } catch (ArrayStoreException e) { System.out.println("ArrayStoreException: " + e.getMessage()); }
+        String[] names = new String[2]; System.out.println(names[0] + " " + (new boolean[1])[0]);
+    }
+}
+</script>
+<script type="text/plain" data-out="A7">
+4 [5, 3, 9, 1] [[0, 0, 0], [0, 0, 7]] 3
+[1, 3, 5, 9] [5, 3, 9, 1, 0, 0] 2
+true false 0 6
+ArrayStoreException: java.lang.Integer
+null false
+</script>
+
+<script type="text/x-java" data-id="A8" data-name="Strings: methods, ==, intern, StringBuilder, format, Unicode">
+public class Main {
+    public static void main(String[] a) {
+        String s = "Hello, World";
+        System.out.println(s.length() + " " + s.charAt(4) + " " + s.indexOf("o") + " " + s.lastIndexOf('o') + " " + s.substring(7) + " " + s.toUpperCase() + " " + s.replace('l', 'L'));
+        System.out.println(s.contains("World") + " " + s.startsWith("He") + " " + "  pad  ".strip() + "|" + " x ".trim() + "|" + "ab".repeat(3) + " " + "".isEmpty() + " " + "  ".isBlank());
+        String a1 = "java", a2 = "ja" + "va", a3 = new String("java"), part = "ja"; String a4 = part + "va";
+        System.out.println((a1 == a2) + " " + (a1 == a3) + " " + a1.equals(a3) + " " + (a1 == a4) + " " + (a1 == a4.intern()) + " " + "Apple".compareTo("Banana") + " " + "b".compareToIgnoreCase("B"));
+        System.out.println(String.join("-", "a", "b", "c") + " " + java.util.Arrays.toString("a,b,,c,".split(",")) + " " + "x1y22z".replaceAll("[0-9]+", "#"));
+        StringBuilder sb = new StringBuilder("abc"); sb.append(1).append('d').insert(0, ">").reverse(); sb.setCharAt(0, 'D');
+        System.out.println(sb + " " + sb.length() + " " + new StringBuffer("xy").append(true));
+        System.out.println(String.format("%-6s|%6s|%06.2f|%,d|%x|%c|%b|%e|%10.3e|%%", "ab", "cd", 3.14159, 1234567, 255, 'Z', null, 0.000123, 123456.789));
+        System.out.println("Name: %s, age %d".formatted("Ravi", 30) + " " + String.valueOf(3.0) + " " + Integer.toString(42, 2));
+        String u = "नमस्ते ₹100 😀";
+        System.out.println(u + " " + u.length() + " " + u.codePointCount(0, u.length()) + " " + "😀".codePointAt(0) + " " + Character.isLetter('é'));
+        System.out.println("hello".chars().filter(c -> c == 'l').count() + " " + "abc".toCharArray().length + " " + String.valueOf(new char[] {'h', 'i'}));
+    }
+}
+</script>
+<script type="text/plain" data-out="A8">
+12 o 4 8 World HELLO, WORLD HeLLo, WorLd
+true true pad|x|ababab true true
+true false true false true -1 0
+a-b-c [a, b, , c] x#y#z
+D1cba> 6 xytrue
+ab    |    cd|003.14|1,234,567|ff|Z|false|1.230000e-04| 1.235e+05|%
+Name: Ravi, age 30 3.0 101010
+नमस्ते ₹100 😀 14 13 128512 true
+2 3 hi
+</script>
+
+<script type="text/x-java" data-id="A9" data-name="Methods: pass-by-value, overloading, recursion, instance methods">
+import java.util.*;
+public class Main {
+    static void change(int x, int[] arr, StringBuilder sb, List<String> list) { x = 99; arr[0] = 99; sb.append("!"); list = new ArrayList<>(); list.add("new"); }
+    static int add(int a, int b) { return a + b; }
+    static double add(double a, double b) { return a + b + 0.5; }
+    static String add(String a, int b) { return a + b; }
+    static long fact(int n) { return n <= 1 ? 1 : n * fact(n - 1); }
+    static int fib(int n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+    int counter = 0; void inc() { counter++; }
+    public static void main(String[] args) {
+        int x = 1; int[] arr = {1}; StringBuilder sb = new StringBuilder("hi"); List<String> list = new ArrayList<>(List.of("old"));
+        change(x, arr, sb, list);
+        System.out.println(x + " " + arr[0] + " " + sb + " " + list);
+        System.out.println(add(2, 3) + " " + add(2.0, 3) + " " + add("n", 1) + " " + fact(20) + " " + fib(20));
+        Main m = new Main(); m.inc(); m.inc(); System.out.println(m.counter);
+    }
+}
+</script>
+<script type="text/plain" data-out="A9">
+1 99 hi! [old]
+5 5.5 n1 2432902008176640000 6765
+2
+</script>
+
+<script type="text/x-java" data-id="A10" data-name="Classes: constructors, chaining, initialization order, equals / hashCode">
+public class Main {
+    static class Account {
+        private static int created = 0;
+        static { System.out.println("static block"); }
+        private final String owner; private double balance;
+        { System.out.println("instance block"); }
+        Account(String owner) { this(owner, 0); System.out.println("1-arg constructor"); }
+        Account(String owner, double balance) { this.owner = owner; this.balance = balance; created++; System.out.println("2-arg constructor"); }
+        void deposit(double amt) { if (amt <= 0) throw new IllegalArgumentException("amount must be positive"); balance += amt; }
+        double getBalance() { return balance; }
+        @Override public String toString() { return owner + ": " + balance; }
+        @Override public boolean equals(Object o) { return o instanceof Account acc && acc.owner.equals(owner); }
+        @Override public int hashCode() { return owner.hashCode(); }
+    }
+    public static void main(String[] args) {
+        System.out.println("main starts");
+        Account a = new Account("Asha");
+        a.deposit(100);
+        Account b = new Account("Asha", 5);
+        System.out.println(a + " | " + b.getBalance() + " | " + a.equals(b) + " " + (a == b) + " " + (a.hashCode() == b.hashCode()) + " " + Account.created);
+        try { a.deposit(-1); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+        System.out.println(new java.util.HashSet<>(java.util.List.of(a, b)).size());
+    }
+}
+</script>
+<script type="text/plain" data-out="A10">
+main starts
+static block
+instance block
+2-arg constructor
+1-arg constructor
+instance block
+2-arg constructor
+Asha: 100.0 | 5.0 | true false true 2
+amount must be positive
+1
+</script>
+
+<script type="text/x-java" data-id="A11" data-name="Inheritance: abstract, super, overriding, polymorphism, casts, field hiding">
+import java.util.*;
+public class Main {
+    static abstract class Animal {
+        protected String name; String kind = "animal";
+        Animal(String name) { this.name = name; }
+        abstract String sound();
+        String describe() { return name + " says " + sound(); }
+        Animal self() { return this; }
+    }
+    static class Dog extends Animal {
+        String kind = "dog";
+        Dog(String n) { super(n); }
+        @Override String sound() { return "Woof"; }
+        @Override Dog self() { return this; }
+        void fetch() { System.out.println(name + " fetches"); }
+    }
+    static class Puppy extends Dog {
+        Puppy(String n) { super(n); }
+        @Override String sound() { return super.sound() + " (tiny)"; }
+    }
+    static class Cat extends Animal {
+        Cat(String n) { super(n); }
+        String sound() { return "Meow"; }
+    }
+    public static void main(String[] args) {
+        List<Animal> zoo = List.of(new Dog("Rex"), new Cat("Tom"), new Puppy("Bit"));
+        for (Animal a : zoo) System.out.println(a.describe());
+        Animal a = zoo.get(0);
+        System.out.println(a.kind + " " + ((Dog) a).kind + " " + (a instanceof Dog) + " " + (a instanceof Puppy) + " " + a.self().getClass().getSimpleName());
+        if (a instanceof Dog d) d.fetch();
+        try { Cat c = (Cat) a; } catch (ClassCastException e) { System.out.println("ClassCastException"); }
+        Object o = new Puppy("P"); System.out.println(o instanceof Animal an ? an.getClass().getSuperclass().getSimpleName() : "no");
+    }
+}
+</script>
+<script type="text/plain" data-out="A11">
+Rex says Woof
+Tom says Meow
+Bit says Woof (tiny)
+animal dog true false Dog
+Rex fetches
+ClassCastException
+Dog
+</script>
+
+<script type="text/x-java" data-id="A12" data-name="Interfaces: default, private, static methods; sealed and non-sealed">
+public class Main {
+    interface Greeter { String name(); default String greet() { return "Hello, " + decorate(name()); } private String decorate(String s) { return "*" + s + "*"; } static Greeter of(String n) { return () -> n; } }
+    interface Loud { default String shout() { return "HEY"; } }
+    static class Person implements Greeter, Loud, Comparable<Person> { final String n; Person(String n) { this.n = n; } public String name() { return n; } public int compareTo(Person o) { return n.compareTo(o.n); } }
+    sealed interface Vehicle permits Car, Bike {}
+    static final class Car implements Vehicle {}
+    static non-sealed class Bike implements Vehicle {}
+    static class EBike extends Bike {}
+    @FunctionalInterface interface Op { int apply(int a, int b); }
+    public static void main(String[] args) {
+        Person p = new Person("Mira");
+        System.out.println(p.greet() + " " + p.shout() + " " + Greeter.of("Zed").greet());
+        Op add = (a, b) -> a + b, mul = (a, b) -> a * b;
+        System.out.println(add.apply(3, 4) + " " + mul.apply(3, 4));
+        Vehicle v = new EBike();
+        String kind = switch (v) { case Car c -> "car"; case Bike b -> "bike " + b.getClass().getSimpleName(); };
+        System.out.println(kind + " " + new Person("A").compareTo(new Person("B")));
+    }
+}
+</script>
+<script type="text/plain" data-out="A12">
+Hello, *Mira* HEY Hello, *Zed*
+7 12
+bike EBike -1
+</script>
+
+<script type="text/x-java" data-id="A13" data-name="Nested classes: static, inner, local, anonymous">
+import java.util.*;
+public class Main {
+    private int secret = 42;
+    static class Counter { private int n; int next() { return ++n; } }
+    class Inner { int reveal() { return secret; } }
+    interface Shape { double area(); }
+    public static void main(String[] args) {
+        Counter c = new Counter(); c.next(); System.out.println(c.next());
+        Main outer = new Main(); Main.Inner in = outer.new Inner(); System.out.println(in.reveal());
+        class Local { String hi(String n) { return "hi " + n; } }
+        System.out.println(new Local().hi("local"));
+        int side = 3;
+        Shape sq = new Shape() { public double area() { return side * side; } @Override public String toString() { return "square " + area(); } };
+        System.out.println(sq);
+        List<String> names = new ArrayList<>(List.of("bob", "Al", "cy"));
+        names.sort(new Comparator<String>() { public int compare(String a, String b) { return Integer.compare(a.length(), b.length()); } });
+        System.out.println(names);
+    }
+}
+</script>
+<script type="text/plain" data-out="A13">
+2
+42
+hi local
+square 9.0
+[Al, cy, bob]
+</script>
+
+<script type="text/x-java" data-id="A14" data-name="Enums: fields, constant bodies, EnumSet / EnumMap, valueOf">
+import java.util.*;
+public class Main {
+    enum Planet {
+        MERCURY(3.303e+23, 2.4397e6), EARTH(5.976e+24, 6.37814e6);
+        private final double mass, radius;
+        Planet(double mass, double radius) { this.mass = mass; this.radius = radius; }
+        double gravity() { return 6.67300E-11 * mass / (radius * radius); }
+    }
+    enum Op {
+        PLUS("+") { int apply(int a, int b) { return a + b; } },
+        TIMES("*") { int apply(int a, int b) { return a * b; } };
+        final String sym; Op(String s) { sym = s; } abstract int apply(int a, int b);
+    }
+    enum Day { MON, TUE, WED, THU, FRI, SAT, SUN }
+    public static void main(String[] args) {
+        for (Planet p : Planet.values()) System.out.printf("%s %d %.2f%n", p, p.ordinal(), p.gravity());
+        for (Op o : Op.values()) System.out.println(o.name() + " " + o.sym + " " + o.apply(6, 7));
+        Day d = Day.valueOf("SAT");
+        String w = switch (d) { case SAT, SUN -> "weekend"; default -> "weekday"; };
+        System.out.println(w + " " + d.compareTo(Day.MON) + " " + EnumSet.range(Day.TUE, Day.THU) + " " + EnumSet.complementOf(EnumSet.of(Day.MON, Day.SUN)).size());
+        EnumMap<Day, Integer> hours = new EnumMap<>(Day.class); hours.put(Day.WED, 8); hours.put(Day.MON, 6); System.out.println(hours);
+        try { Day.valueOf("XYZ"); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+    }
+}
+</script>
+<script type="text/plain" data-out="A14">
+MERCURY 0 3.70
+EARTH 1 9.80
+PLUS + 13
+TIMES * 42
+weekend 5 [TUE, WED, THU] 5
+{MON=6, WED=8}
+No enum constant Main.Day.XYZ
+</script>
+
+<script type="text/x-java" data-id="A15" data-name="Records: compact constructors, record patterns, generic records">
+import java.util.*;
+public class Main {
+    record Point(int x, int y) {
+        static final Point ORIGIN = new Point(0, 0);
+        Point { if (x < 0) throw new IllegalArgumentException("x < 0: " + x); }
+        Point(int v) { this(v, v); }
+        double dist() { return Math.sqrt(x * x + y * y); }
+        static Point of(String s) { String[] p = s.split(","); return new Point(Integer.parseInt(p[0]), Integer.parseInt(p[1])); }
+    }
+    record Line(Point from, Point to) {}
+    record Pair<A, B>(A first, B second) implements Comparable<Pair<A, B>> { public int compareTo(Pair<A, B> o) { return first.toString().compareTo(o.first.toString()); } }
+    public static void main(String[] args) {
+        Point p = new Point(3, 4);
+        System.out.println(p + " " + p.x() + " " + p.dist() + " " + p.equals(Point.of("3,4")) + " " + new Point(7) + " " + Point.ORIGIN);
+        Object o = new Line(p, new Point(5));
+        if (o instanceof Line(Point(var x1, var y1), Point to) && x1 < to.x()) System.out.println("from " + x1 + "," + y1 + " to " + to);
+        try { new Point(-1, 0); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+        Set<Point> set = new HashSet<>(); set.add(new Point(1, 1)); set.add(new Point(1, 1)); set.add(new Point(2, 2));
+        System.out.println(set.size() + " " + new Pair<>("b", 1).compareTo(new Pair<>("a", 2)) + " " + new Pair<>("k", List.of(1)));
+    }
+}
+</script>
+<script type="text/plain" data-out="A15">
+Point[x=3, y=4] 3 5.0 true Point[x=7, y=7] Point[x=0, y=0]
+from 3,4 to Point[x=5, y=5]
+x < 0: -1
+2 1 Pair[first=k, second=[1]]
+</script>
+
+<script type="text/x-java" data-id="A16" data-name="Generics: bounds, wildcards, generic methods, default generic methods">
+import java.util.*;
+public class Main {
+    static class Box<T extends Comparable<T>> { private T v; Box(T v) { this.v = v; } T get() { return v; } boolean bigger(Box<T> o) { return v.compareTo(o.v) > 0; } }
+    static <T> void swap(T[] a, int i, int j) { T t = a[i]; a[i] = a[j]; a[j] = t; }
+    static double sum(List<? extends Number> nums) { double s = 0; for (Number n : nums) s += n.doubleValue(); return s; }
+    static void fill(List<? super Integer> out) { out.add(1); out.add(2); }
+    static <K, V extends Comparable<V>> K argMax(Map<K, V> m) { K best = null; V bv = null; for (var e : m.entrySet()) if (bv == null || e.getValue().compareTo(bv) > 0) { best = e.getKey(); bv = e.getValue(); } return best; }
+    interface Transformer<A, B> { B apply(A a); default <C> Transformer<A, C> then(Transformer<B, C> next) { return a -> next.apply(apply(a)); } }
+    public static void main(String[] args) {
+        System.out.println(new Box<>(5).bigger(new Box<>(3)) + " " + new Box<>("pear").get());
+        String[] s = {"a", "b", "c"}; swap(s, 0, 2); System.out.println(String.join("", s));
+        List<Object> sink = new ArrayList<>(); fill(sink);
+        System.out.println(sum(List.of(1, 2.5, 3L)) + " " + sink + " " + argMax(Map.of("x", 3, "y", 9, "z", 5)));
+        Transformer<String, Integer> len = String::length;
+        System.out.println(len.then(n -> n * n).apply("four"));
+        List<String> raw = new ArrayList<>(); Object o = raw; System.out.println(o instanceof List<?> l ? "list of " + l.size() : "no");
+    }
+}
+</script>
+<script type="text/plain" data-out="A16">
+true pear
+cba
+6.5 [1, 2] y
+16
+list of 0
+</script>
+
+<script type="text/x-java" data-id="A17" data-name="Exceptions: custom, finally, multi-catch, try-with-resources + suppressed, causes, assert, CME">
+import java.io.*;
+public class Main {
+    static class InsufficientFundsException extends Exception { final double shortBy; InsufficientFundsException(double s) { super("short by " + s); shortBy = s; } }
+    static class Res implements AutoCloseable { final String n; Res(String n) { this.n = n; System.out.println("open " + n); } public void close() throws Exception { System.out.println("close " + n); if (n.equals("B")) throw new IOException("close failed " + n); } }
+    static void withdraw(double bal, double amt) throws InsufficientFundsException { if (amt > bal) throw new InsufficientFundsException(amt - bal); }
+    static int tricky() { try { return 1; } finally { System.out.println("finally before return"); } }
+    public static void main(String[] args) throws Exception {
+        try { withdraw(50, 80); } catch (InsufficientFundsException e) { System.out.println(e.getMessage() + " " + e.shortBy); } finally { System.out.println("finally"); }
+        try { Object o = null; o.toString(); } catch (NullPointerException | ArithmeticException e) { System.out.println("multi-catch " + e.getClass().getSimpleName()); }
+        try (Res a = new Res("A"); Res b = new Res("B")) { System.out.println("body"); throw new IllegalStateException("body failed"); }
+        catch (IllegalStateException e) { System.out.println(e.getMessage() + ", suppressed: " + e.getSuppressed().length + " " + e.getSuppressed()[0].getMessage()); }
+        System.out.println(tricky());
+        try { try { Integer.parseInt("x"); } catch (NumberFormatException e) { throw new RuntimeException("wrapped", e); } }
+        catch (RuntimeException e) { System.out.println(e.getMessage() + " <- " + e.getCause().getClass().getName()); }
+        try { int[] a = new int[2]; a[2] = 1; } catch (RuntimeException e) { System.out.println(e); }
+        try { throw new Error("custom error"); } catch (Throwable t) { System.out.println(t instanceof Exception); }
+        try { assert 1 > 2 : "assertions are on"; System.out.println("assertions are off"); } catch (AssertionError e) { System.out.println(e.getMessage()); }
+        try { java.util.List.of(1).add(2); } catch (UnsupportedOperationException e) { System.out.println("immutable: " + e.getMessage()); }
+        try { var l = new java.util.ArrayList<>(java.util.List.of(1, 2, 3)); for (Integer x : l) if (x == 1) l.remove(x); } catch (java.util.ConcurrentModificationException e) { System.out.println("CME " + e.getMessage()); }
+    }
+}
+</script>
+<script type="text/plain" data-out="A17">
+short by 30.0 30.0
+finally
+multi-catch NullPointerException
+open A
+open B
+body
+close B
+close A
+body failed, suppressed: 1 close failed B
+finally before return
+1
+wrapped <- java.lang.NumberFormatException
+java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+false
+assertions are off
+immutable: null
+CME null
+</script>
+
+<script type="text/x-java" data-id="A17b" data-name="Uncaught exception: the JVM's message, the visitor's frames, exit code 1" data-code="1" data-err="Exception in thread &quot;main&quot; java.lang.IllegalArgumentException: bad number: 12x
+	at Main.parse(Main.java:2)
+	at Main.main(Main.java:3)
+Caused by: java.lang.NumberFormatException: For input string: &quot;12x&quot;">
+public class Main {
+    static int parse(String s) { try { return Integer.parseInt(s); } catch (NumberFormatException e) { throw new IllegalArgumentException("bad number: " + s, e); } }
+    public static void main(String[] a) { System.out.println("start"); System.out.println(parse("12x")); }
+}
+</script>
+<script type="text/plain" data-out="A17b">
+start
+</script>
+
+<script type="text/x-java" data-id="A18" data-name="Lambdas: method references, java.util.function, composition, Optional">
+import java.util.*;
+import java.util.function.*;
+public class Main {
+    static int twice(int x) { return 2 * x; }
+    public static void main(String[] args) {
+        Function<Integer, Integer> inc = x -> x + 1, dbl = Main::twice;
+        System.out.println(inc.andThen(dbl).apply(5) + " " + inc.compose(dbl).apply(5) + " " + Function.<Integer>identity().apply(9));
+        BiFunction<String, Integer, String> rep = String::repeat; Supplier<List<String>> mk = ArrayList::new; Consumer<String> pr = System.out::println;
+        UnaryOperator<String> up = String::toUpperCase; BinaryOperator<Integer> max = BinaryOperator.maxBy(Comparator.naturalOrder());
+        Predicate<String> empty = String::isEmpty, notEmpty = empty.negate(), longish = s -> s.length() > 3;
+        List<String> l = mk.get(); l.add(rep.apply("ab", 2)); pr.accept(up.apply(l.get(0)));
+        System.out.println(max.apply(3, 8) + " " + notEmpty.and(longish).test("abcd") + " " + notEmpty.or(longish).test("") + " " + Predicate.not(empty).test("x"));
+        IntBinaryOperator gcd = (a, b) -> { while (b != 0) { int t = b; b = a % b; a = t; } return a; };
+        ToIntFunction<String> len = String::length; IntPredicate even = n -> n % 2 == 0;
+        System.out.println(gcd.applyAsInt(84, 36) + " " + len.applyAsInt("seven") + " " + even.test(4));
+        int base = 10; Runnable r = () -> System.out.println("captured " + base); r.run();
+        Optional<String> name = Optional.of("kai"); System.out.println(name.map(String::toUpperCase).orElse("none") + " " + Optional.empty().isPresent());
+    }
+}
+</script>
+<script type="text/plain" data-out="A18">
+12 11 9
+ABAB
+8 true false true
+12 5 true
+captured 10
+KAI false
+</script>
+
+<script type="text/x-java" data-id="A19" data-name="Annotations: custom, retention, reading them by reflection">
+import java.lang.annotation.*;
+import java.lang.reflect.*;
+import java.util.*;
+public class Main {
+    @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String value() default "unnamed"; int times() default 1; }
+    @Retention(RetentionPolicy.RUNTIME) @interface Info { String author(); }
+    @Info(author = "Ravi") static class Suite {
+        @Test("adds") public void a() {}
+        @Test(value = "multiplies", times = 3) public void b() {}
+        public void helper() {}
+        @Deprecated public void old() {}
+    }
+    @SafeVarargs static <T> List<T> listOf(T... xs) { return Arrays.asList(xs); }
+    @SuppressWarnings("unchecked") public static void main(String[] args) {
+        List<String> names = new ArrayList<>();
+        for (Method m : Suite.class.getDeclaredMethods()) { Test t = m.getAnnotation(Test.class); if (t != null) names.add(m.getName() + ":" + t.value() + "x" + t.times()); }
+        Collections.sort(names);
+        System.out.println(names + " " + Suite.class.getAnnotation(Info.class).author() + " " + listOf(1, 2));
+        try { System.out.println(Suite.class.getMethod("old").isAnnotationPresent(Deprecated.class)); } catch (NoSuchMethodException e) { System.out.println(e); }
+    }
+}
+</script>
+<script type="text/plain" data-out="A19">
+[a:addsx1, b:multipliesx3] Ravi [1, 2]
+true
+</script>
+
+<script type="text/x-java" data-id="A21" data-name="Newest Java: unnamed variables _ (Java 22)">
+import java.util.*;
+public class Main {
+    record P(int x, int y) {}
+    public static void main(String[] args) {
+        int count = 0; for (var _ : List.of(1, 2, 3)) count++;
+        Object o = new P(1, 2);
+        if (o instanceof P(int x, _)) System.out.println("x=" + x + " count=" + count);
+        try { Integer.parseInt("z"); } catch (NumberFormatException _) { System.out.println("ignored"); }
+    }
+}
+</script>
+<script type="text/plain" data-out="A21">
+x=1 count=3
+ignored
+</script>
+
+<script type="text/x-java" data-id="B1" data-name="Console: Scanner next / nextInt / nextDouble / nextBoolean / nextLine, System.err, printf" data-input="Ravi 25 5.5|true|one two||last line" data-err="to stderr">
+import java.util.*;
+public class Main {
+    public static void main(String[] args) {
+        Scanner in = new Scanner(System.in);
+        String name = in.next(); int age = in.nextInt(); double h = in.nextDouble(); boolean b = in.nextBoolean();
+        in.nextLine();
+        String l2 = in.nextLine(); String l3 = in.nextLine(); String l4 = in.nextLine();
+        System.out.println(name + "|" + age + "|" + h + "|" + b + "|" + l2 + "|" + l3 + "|" + l4 + "|" + in.hasNextLine());
+        System.err.println("to stderr");
+        System.out.printf("%5.1f%%%n", 12.345);
+        System.out.print("no newline");
+    }
+}
+</script>
+<script type="text/plain" data-out="B1">
+Ravi|25|5.5|true|one two||last line|false
+ 12.3%
+no newline</script>
+
+<script type="text/x-java" data-id="B2" data-name="Collections: lists, sets, maps, deques, iterators, Collections.*, sequenced collections">
+import java.util.*;
+public class Main {
+    public static void main(String[] args) {
+        List<Integer> al = new ArrayList<>(List.of(5, 1, 4)); al.add(0, 9); al.remove(Integer.valueOf(1)); al.set(1, 7);
+        LinkedList<String> ll = new LinkedList<>(List.of("b")); ll.addFirst("a"); ll.addLast("c"); ll.removeFirst();
+        System.out.println(al + " " + al.indexOf(4) + " " + al.contains(9) + " " + ll + " " + ll.peekLast());
+        Set<String> hs = new HashSet<>(List.of("pear", "apple", "fig", "apple")); Set<String> lhs = new LinkedHashSet<>(List.of("pear", "apple", "fig")); TreeSet<String> ts = new TreeSet<>(hs);
+        System.out.println(hs + " " + lhs + " " + ts + " " + ts.first() + " " + ts.ceiling("b") + " " + ts.headSet("g") + " " + ts.descendingSet());
+        Map<String, Integer> hm = new HashMap<>(); for (String w : "the cat and the hat and the bat".split(" ")) hm.merge(w, 1, Integer::sum);
+        Map<String, Integer> tm = new TreeMap<>(hm); Map<String, Integer> lhm = new LinkedHashMap<>(); lhm.put("z", 1); lhm.put("a", 2); lhm.putIfAbsent("z", 9);
+        System.out.println(hm + " " + tm + " " + lhm + " " + hm.getOrDefault("dog", 0) + " " + tm.keySet() + " " + ((TreeMap<String, Integer>) tm).firstEntry());
+        Deque<Integer> dq = new ArrayDeque<>(); dq.push(1); dq.push(2); dq.offerLast(3); PriorityQueue<Integer> pq = new PriorityQueue<>(Comparator.reverseOrder()); pq.addAll(List.of(3, 9, 1, 7));
+        System.out.print(dq.pop() + " " + dq + " "); while (!pq.isEmpty()) System.out.print(pq.poll() + ","); System.out.println();
+        Stack<String> st = new Stack<>(); st.push("x"); st.push("y"); System.out.println(st.peek() + " " + st + " " + new Vector<>(List.of(1, 2)));
+        List<String> words = new ArrayList<>(List.of("kiwi", "Banana", "apple", "fig"));
+        Collections.sort(words); System.out.print(words + " "); words.sort(String.CASE_INSENSITIVE_ORDER); System.out.print(words + " ");
+        words.sort(Comparator.comparing(String::length).thenComparing(Comparator.reverseOrder())); System.out.println(words);
+        System.out.println(Collections.max(List.of(3, 8, 2)) + " " + Collections.frequency(List.of(1, 2, 1), 1) + " " + Collections.nCopies(3, "ab") + " " + Collections.unmodifiableList(al).getClass().getSimpleName().startsWith("Unmodifiable"));
+        Iterator<Integer> it = al.iterator(); while (it.hasNext()) if (it.next() > 5) it.remove(); ListIterator<Integer> li = al.listIterator(); while (li.hasNext()) li.set(li.next() * 10);
+        System.out.println(al + " " + List.of(1, 2).getFirst() + " " + new ArrayList<>(List.of(1, 2, 3)).reversed() + " " + new TreeMap<>(Map.of(1, "a", 5, "e", 3, "c")).headMap(4));
+    }
+}
+</script>
+<script type="text/plain" data-out="B2">
+[9, 7, 4] 2 true [b, c] c
+[apple, pear, fig] [pear, apple, fig] [apple, fig, pear] apple fig [apple, fig] [pear, fig, apple]
+{the=3, bat=1, and=2, cat=1, hat=1} {and=2, bat=1, cat=1, hat=1, the=3} {z=1, a=2} 0 [and, bat, cat, hat, the] and=2
+2 [1, 3] 9,7,3,1,
+y [x, y] [1, 2]
+[Banana, apple, fig, kiwi] [apple, Banana, fig, kiwi] [fig, kiwi, apple, Banana]
+8 2 [ab, ab, ab] true
+[40] 1 [3, 2, 1] {1=a, 3=c}
+</script>
+
+<script type="text/x-java" data-id="B3" data-name="Streams: collectors, groupingBy, partitioningBy, teeing, primitive and parallel streams">
+import java.util.*;
+import java.util.stream.*;
+public class Main {
+    record Emp(String name, String dept, double pay) {}
+    public static void main(String[] args) {
+        List<Emp> emps = List.of(new Emp("Asha", "IT", 900), new Emp("Ben", "HR", 500), new Emp("Chen", "IT", 1200), new Emp("Dia", "Ops", 700), new Emp("Eli", "HR", 650));
+        System.out.println(emps.stream().filter(e -> e.pay() > 600).map(Emp::name).sorted(Comparator.reverseOrder()).collect(Collectors.joining(", ", "[", "]")));
+        Map<String, List<String>> byDept = emps.stream().collect(Collectors.groupingBy(Emp::dept, TreeMap::new, Collectors.mapping(Emp::name, Collectors.toList())));
+        System.out.println(byDept);
+        Map<Boolean, Long> rich = emps.stream().collect(Collectors.partitioningBy(e -> e.pay() >= 700, Collectors.counting()));
+        System.out.println(rich + " " + emps.stream().mapToDouble(Emp::pay).average().getAsDouble() + " " + emps.stream().collect(Collectors.summingDouble(Emp::pay)));
+        DoubleSummaryStatistics st = emps.stream().mapToDouble(Emp::pay).summaryStatistics();
+        System.out.println(st.getMin() + " " + st.getMax() + " " + st.getCount() + " " + emps.stream().max(Comparator.comparingDouble(Emp::pay)).map(Emp::name).orElse("-"));
+        System.out.println(Stream.of("a,b", "c", "d,e,f").flatMap(s -> Arrays.stream(s.split(","))).collect(Collectors.toList()) + " " + IntStream.rangeClosed(1, 5).boxed().collect(Collectors.toMap(i -> i, i -> i * i)));
+        System.out.println(Stream.iterate(1, x -> x <= 100, x -> x * 3).toList() + " " + Stream.generate(() -> "z").limit(3).collect(Collectors.joining()) + " " + IntStream.of(3, 1, 3, 2, 1).distinct().sorted().boxed().toList());
+        System.out.println(IntStream.range(0, 10).skip(2).limit(5).sum() + " " + Stream.of(1, 2, 3, 4, 5, 1).takeWhile(x -> x < 4).toList() + " " + Stream.of(1, 2, 3, 4, 1).dropWhile(x -> x < 3).toList() + " " + Stream.of(5, 3, 8).reduce(0, Integer::sum) + " " + Stream.of("x").findFirst().get());
+        System.out.println(emps.stream().anyMatch(e -> e.dept().equals("Ops")) + " " + emps.stream().allMatch(e -> e.pay() > 400) + " " + emps.stream().noneMatch(e -> e.pay() > 2000) + " " + emps.stream().count() + " " + Arrays.toString(Stream.of(3, 1).sorted().toArray()));
+        String team = emps.stream().collect(Collectors.teeing(Collectors.counting(), Collectors.averagingDouble(Emp::pay), (n, avg) -> n + " people, avg " + avg));
+        System.out.println(team);
+        System.out.println(IntStream.rangeClosed(1, 2000).parallel().filter(i -> i % 7 == 0).count() + " " + List.of(4, 5, 6).parallelStream().map(x -> x * 2).collect(Collectors.toList()));
+        List<String> seen = new ArrayList<>(); Stream.of("p", "q").peek(seen::add).map(String::toUpperCase).forEach(System.out::print); System.out.println(" " + seen);
+        System.out.println(Stream.of("bb", "a", "ccc").collect(Collectors.groupingBy(String::length)) + " " + Stream.of("x", "y", "x").collect(Collectors.toCollection(TreeSet::new)));
+    }
+}
+</script>
+<script type="text/plain" data-out="B3">
+[Eli, Dia, Chen, Asha]
+{HR=[Ben, Eli], IT=[Asha, Chen], Ops=[Dia]}
+{false=2, true=3} 790.0 3950.0
+500.0 1200.0 5 Chen
+[a, b, c, d, e, f] {1=1, 2=4, 3=9, 4=16, 5=25}
+[1, 3, 9, 27, 81] zzz [1, 2, 3]
+20 [1, 2, 3] [3, 4, 1] 16 x
+true true true 5 [1, 3]
+5 people, avg 790.0
+285 [8, 10, 12]
+PQ [p, q]
+{1=[a], 2=[bb], 3=[ccc]} [x, y]
+</script>
+
+<script type="text/x-java" data-id="B4" data-name="Numbers: Math, wrappers, Character, BigInteger, BigDecimal, Random, DecimalFormat">
+import java.math.*;
+import java.text.*;
+import java.util.*;
+public class Main {
+    public static void main(String[] args) {
+        System.out.println(Math.abs(-7.5) + " " + Math.pow(2, 10) + " " + Math.sqrt(144) + " " + Math.cbrt(27) + " " + Math.max(3, 9) + " " + Math.round(2.5) + " " + Math.round(-2.5) + " " + Math.ceil(4.1) + " " + Math.floor(-4.1) + " " + Math.hypot(3, 4));
+        System.out.println(Math.toDegrees(Math.PI) + " " + Math.sin(Math.PI / 2) + " " + Math.log10(1000) + " " + Math.exp(0) + " " + Math.signum(-3.0) + " " + Math.rint(2.5) + " " + Math.clamp(15, 0, 10));
+        System.out.println(Integer.parseInt("-42") + " " + Integer.valueOf("17") + " " + Double.parseDouble("3.5e2") + " " + Integer.toBinaryString(42) + " " + Integer.toHexString(-1) + " " + Long.toOctalString(64) + " " + Integer.parseInt("ff", 16) + " " + Integer.bitCount(255) + " " + Character.getNumericValue('7'));
+        System.out.println(Character.isDigit('5') + " " + Character.isUpperCase('a') + " " + Character.toUpperCase('q') + " " + Character.isWhitespace('\t') + " " + Character.isLetterOrDigit('_') + " " + (int) Character.forDigit(11, 16));
+        Integer a = 127, b = 127, c = 1000, d = 1000; System.out.println((a == b) + " " + (c == d) + " " + c.equals(d) + " " + Integer.compare(5, 9) + " " + Double.isNaN(0.0 / 0));
+        BigInteger f = BigInteger.ONE; for (int i = 2; i <= 30; i++) f = f.multiply(BigInteger.valueOf(i));
+        System.out.println(f + " " + f.bitLength() + " " + new BigInteger("123456789").mod(BigInteger.valueOf(97)) + " " + BigInteger.TWO.pow(64) + " " + BigInteger.valueOf(17).isProbablePrime(10));
+        BigDecimal p = new BigDecimal("19.99"), q = new BigDecimal("3");
+        System.out.println(p.multiply(q) + " " + p.divide(q, 4, RoundingMode.HALF_UP) + " " + p.setScale(1, RoundingMode.HALF_EVEN) + " " + new BigDecimal("2.50").stripTrailingZeros() + " " + new BigDecimal("1.10").equals(new BigDecimal("1.1")) + " " + new BigDecimal("1.10").compareTo(new BigDecimal("1.1")) + " " + new BigDecimal(0.1).toString().length());
+        try { BigDecimal.ONE.divide(q); } catch (ArithmeticException e) { System.out.println(e.getMessage()); }
+        Random r = new Random(2024); System.out.println(r.nextInt(10) + " " + r.nextInt(5, 10) + " " + r.nextBoolean());
+        System.out.println(new DecimalFormat("#,##0.00").format(1234567.891) + " " + new DecimalFormat("0.###E0").format(12345) + " " + NumberFormat.getPercentInstance(Locale.US).format(0.256) + " " + NumberFormat.getCurrencyInstance(Locale.US).format(1234.5));
+        int rnd = (int) (Math.random() * 6) + 1; System.out.println(rnd >= 1 && rnd <= 6);
+    }
+}
+</script>
+<script type="text/plain" data-out="B4">
+7.5 1024.0 12.0 3.0 9 3 -2 5.0 -5.0 5.0
+180.0 1.0 3.0 1.0 -1.0 2.0 10
+-42 17 350.0 101010 ffffffff 100 255 8 7
+true false Q true false 98
+true false true -1 true
+265252859812191058636308480000000 108 39 18446744073709551616 true
+59.97 6.6633 20.0 2.5 false 0 57
+Non-terminating decimal expansion; no exact representable decimal result.
+0 6 false
+1,234,567.89 1.234E4 26% $1,234.50
+true
+</script>
+
+<script type="text/x-java" data-id="B5" data-name="Date and time: LocalDate / Time / DateTime, Period, Duration, zones, formatting, legacy Calendar" data-bug="1">
+import java.time.*;
+import java.time.format.*;
+import java.time.temporal.*;
+import java.util.*;
+public class Main {
+    public static void main(String[] args) throws Exception {
+        LocalDate d = LocalDate.of(2024, 1, 31);
+        System.out.println(d.plusMonths(1) + " " + d.plusDays(30) + " " + d.getDayOfWeek() + " " + d.isLeapYear() + " " + d.lengthOfMonth() + " " + d.withDayOfMonth(1) + " " + d.getDayOfYear());
+        LocalDate birth = LocalDate.of(1990, 5, 15), today = LocalDate.of(2025, 3, 1);
+        Period age = Period.between(birth, today); System.out.println(age + " " + age.getYears() + " " + ChronoUnit.DAYS.between(birth, today) + " " + birth.until(today, ChronoUnit.MONTHS));
+        LocalTime t = LocalTime.of(9, 45, 30); System.out.println(t.plusHours(15) + " " + t.minusMinutes(50) + " " + t.truncatedTo(ChronoUnit.HOURS) + " " + Duration.between(t, LocalTime.NOON));
+        LocalDateTime dt = LocalDateTime.of(2025, 12, 31, 23, 59); System.out.println(dt.plusMinutes(2) + " " + dt.format(DateTimeFormatter.ofPattern("EEE, dd MMM yyyy hh:mm a")) + " " + LocalDate.parse("05/03/2024", DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+        ZonedDateTime z = ZonedDateTime.of(dt, ZoneId.of("Asia/Kolkata")); System.out.println(z + " " + z.withZoneSameInstant(ZoneId.of("America/New_York")).toLocalTime() + " " + z.toInstant());
+        Instant i = Instant.ofEpochSecond(1_700_000_000L); System.out.println(i + " " + Duration.ofSeconds(3725) + " " + Duration.ofMinutes(90).toHours() + " " + Period.ofDays(45).normalized() + " " + Year.isLeap(2100) + " " + YearMonth.of(2024, 2).lengthOfMonth());
+        System.out.println(DayOfWeek.MONDAY.plus(10) + " " + Month.FEBRUARY.maxLength() + " " + d.with(TemporalAdjusters.lastDayOfMonth()) + " " + d.with(TemporalAdjusters.next(DayOfWeek.FRIDAY)) + " " + DateTimeFormatter.ISO_LOCAL_DATE.format(d));
+        try { LocalDate.of(2023, 2, 29); } catch (DateTimeException e) { System.out.println(e.getMessage()); }
+        Calendar c = new GregorianCalendar(2024, Calendar.MARCH, 10); c.add(Calendar.DAY_OF_MONTH, 25); System.out.println(c.get(Calendar.MONTH) + " " + c.get(Calendar.DAY_OF_MONTH) + " " + c.get(Calendar.YEAR));
+        long t0 = System.nanoTime(); long n = 0; for (int k = 0; k < 1000; k++) n += k; System.out.println((System.nanoTime() - t0) >= 0 && n == 499500);
+        System.out.println(LocalDate.now().getYear() >= 2026);
+        Instant a1 = Instant.now(); Thread.sleep(60); System.out.println("Instant moves: " + (Duration.between(a1, Instant.now()).toMillis() >= 40));
+        System.out.println("LocalTime.now near the wall clock: " + (Math.abs(Duration.between(LocalDateTime.now(ZoneOffset.UTC), LocalDateTime.ofEpochSecond(System.currentTimeMillis() / 1000, 0, ZoneOffset.UTC)).toSeconds()) < 5));
+    }
+}
+</script>
+<script type="text/plain" data-out="B5">
+2024-02-29 2024-03-01 WEDNESDAY true 31 2024-01-01 31
+P34Y9M14D 34 12709 417
+00:45:30 08:55:30 09:00 PT2H14M30S
+2026-01-01T00:01 Wed, 31 Dec 2025 11:59 PM 2024-03-05
+2025-12-31T23:59+05:30[Asia/Kolkata] 13:29 2025-12-31T18:29:00Z
+2023-11-14T22:13:20Z PT1H2M5S 1 P45D false 29
+THURSDAY 29 2024-01-31 2024-02-02 2024-01-31
+Invalid date 'February 29' as '2023' is not a leap year
+3 4 2024
+true
+true
+Instant moves: true
+LocalTime.now near the wall clock: true
+</script>
+
+<script type="text/x-java" data-id="B6" data-name="Files: every read API" data-files='{"in.txt":"alpha\nbeta\ngamma\n"}' data-bug="2, 3">
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+public class Main {
+    interface Read { Object run() throws Exception; }
+    static void t(String name, Read r) { try { Object v = r.run(); System.out.println("ok   " + name + " " + String.valueOf(v).replace("\n", "|")); } catch (Throwable e) { System.out.println("FAIL " + name + " " + e); } }
+    public static void main(String[] a) {
+        Path p = Path.of("in.txt");
+        t("BufferedReader(FileReader).readLine x3", () -> { try (BufferedReader r = new BufferedReader(new FileReader("in.txt"))) { return r.readLine() + r.readLine() + r.readLine(); } });
+        t("FileInputStream.read(byte[]) to the end", () -> { try (FileInputStream in = new FileInputStream("in.txt")) { byte[] b = new byte[4]; int n, t = 0; while ((n = in.read(b)) != -1) t += n; return t; } });
+        t("FileInputStream.readAllBytes", () -> { try (FileInputStream in = new FileInputStream("in.txt")) { return in.readAllBytes().length; } });
+        t("Scanner(File) hasNextLine loop", () -> { int n = 0; try (Scanner s = new Scanner(new File("in.txt"))) { while (s.hasNextLine()) { s.nextLine(); n++; } } return n; });
+        t("Files.readAllBytes", () -> Files.readAllBytes(p).length);
+        t("Files.readString", () -> Files.readString(p));
+        t("Files.readAllLines", () -> Files.readAllLines(p));
+        t("Files.lines", () -> { try (var s = Files.lines(p)) { return s.count(); } });
+        t("Files.newBufferedReader", () -> { try (BufferedReader r = Files.newBufferedReader(p)) { String l, o = ""; while ((l = r.readLine()) != null) o += l; return o; } });
+        t("Files.newInputStream.readAllBytes", () -> { try (InputStream in = Files.newInputStream(p)) { return in.readAllBytes().length; } });
+        t("RandomAccessFile.readLine to the end", () -> { try (RandomAccessFile f = new RandomAccessFile("in.txt", "r")) { int n = 0; while (f.readLine() != null) n++; return n; } });
+    }
+}
+</script>
+<script type="text/plain" data-out="B6">
+ok   BufferedReader(FileReader).readLine x3 alphabetagamma
+ok   FileInputStream.read(byte[]) to the end 17
+ok   FileInputStream.readAllBytes 17
+ok   Scanner(File) hasNextLine loop 3
+ok   Files.readAllBytes 17
+ok   Files.readString alpha|beta|gamma|
+ok   Files.readAllLines [alpha, beta, gamma]
+ok   Files.lines 3
+ok   Files.newBufferedReader alphabetagamma
+ok   Files.newInputStream.readAllBytes 17
+ok   RandomAccessFile.readLine to the end 3
+</script>
+
+<script type="text/x-java" data-id="B6b" data-name="Files: folders, copy, move, walk, Data streams, Path, exceptions, append">
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import java.util.stream.*;
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Path dir = Files.createDirectories(Path.of("data/sub"));
+        Files.writeString(dir.resolve("a.txt"), "A");
+        Files.copy(Path.of("data/sub/a.txt"), Path.of("data/b.txt"));
+        Files.move(Path.of("data/b.txt"), Path.of("data/c.txt"), StandardCopyOption.REPLACE_EXISTING);
+        try (Stream<Path> w = Files.walk(Path.of("data"))) { System.out.println(w.map(Path::toString).sorted().collect(Collectors.toList())); }
+        try (DataOutputStream out = new DataOutputStream(new FileOutputStream("nums.bin"))) { out.writeInt(42); out.writeDouble(2.5); out.writeUTF("héllo"); }
+        try (DataInputStream in = new DataInputStream(new FileInputStream("nums.bin"))) { System.out.println(in.readInt() + " " + in.readDouble() + " " + in.readUTF()); }
+        System.out.println(Files.size(Path.of("nums.bin")) + " " + Files.isRegularFile(Path.of("data/c.txt")) + " " + Files.exists(Path.of("data/b.txt")) + " " + (Files.getLastModifiedTime(Path.of("data/c.txt")).toMillis() > 0));
+        Path p = Path.of("data/sub/a.txt"); System.out.println(p.getFileName() + " " + p.getParent() + " " + p.getNameCount() + " " + p.toAbsolutePath() + " " + Path.of("x/../y/./z").normalize());
+        try { Files.delete(Path.of("data")); } catch (DirectoryNotEmptyException e) { System.out.println("not empty: " + e.getFile()); }
+        try { Files.readString(Path.of("nope.txt")); } catch (NoSuchFileException e) { System.out.println("missing: " + e.getMessage()); }
+        try (BufferedWriter bw = Files.newBufferedWriter(Path.of("log.txt"), StandardOpenOption.CREATE, StandardOpenOption.APPEND)) { bw.write("one"); bw.newLine(); }
+        try (BufferedWriter bw = Files.newBufferedWriter(Path.of("log.txt"), StandardOpenOption.APPEND)) { bw.write("two"); bw.newLine(); }
+        System.out.println(Files.readString(Path.of("log.txt")).replace("\n", "|"));
+        try (PrintWriter w = new PrintWriter(new File("w.txt"))) { w.printf("%d%n", 42); }
+        try (var s = Files.list(Path.of("."))) { System.out.println(s.map(x -> x.getFileName().toString()).sorted().toList()); }
+        new File("w.txt").renameTo(new File("w2.txt")); System.out.println(new File("w2.txt").exists() + " " + new File("w.txt").delete() + " " + new File("w2.txt").delete());
+    }
+}
+</script>
+<script type="text/plain" data-out="B6b">
+[data, data/c.txt, data/sub, data/sub/a.txt]
+42 2.5 héllo
+20 true false true
+a.txt data/sub 3 /home/student/data/sub/a.txt y/z
+not empty: data
+missing: nope.txt
+one|two|
+[data, log.txt, nums.bin, w.txt]
+true false true
+</script>
+
+<script type="text/x-java" data-id="B7" data-name="Serialization: ObjectOutputStream / ObjectInputStream, transient" data-bug="3">
+import java.io.*;
+import java.util.*;
+public class Main {
+    static class Student implements Serializable { private static final long serialVersionUID = 1L; String name; int[] marks; transient String password = "secret"; Student(String n, int... m) { name = n; marks = m; } }
+    public static void main(String[] args) throws Exception {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream("students.ser"))) { out.writeObject(List.of(new Student("Ana", 90, 85), new Student("Raj", 70))); }
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream("students.ser"))) {
+            @SuppressWarnings("unchecked") List<Student> back = (List<Student>) in.readObject();
+            for (Student s : back) System.out.println(s.name + " " + Arrays.toString(s.marks) + " " + s.password);
+        }
+    }
+}
+</script>
+<script type="text/plain" data-out="B7">
+Ana [90, 85] null
+Raj [70] null
+</script>
+
+<script type="text/x-java" data-id="B8" data-name="Text: regex groups and flags, StringTokenizer, case rules, locales, charsets" data-bug="6">
+import java.util.*;
+import java.util.regex.*;
+import java.nio.charset.StandardCharsets;
+public class Main {
+    public static void main(String[] args) {
+        Matcher m = Pattern.compile("(\\w+)@(\\w+)\\.com").matcher("mail asha@site.com or ben@corp.com");
+        List<String> found = new ArrayList<>(); while (m.find()) found.add(m.group(1) + " at " + m.group(2) + " [" + m.start() + "]");
+        System.out.println(found);
+        System.out.println("2024-03-15".matches("\\d{4}-\\d{2}-\\d{2}") + " " + "a1b22c333".replaceAll("(\\d+)", "<$1>") + " " + Arrays.toString("one, two;three".split("[,;]\\s*")));
+        Matcher named = Pattern.compile("(?<day>\\d+)/(?<mon>\\d+)").matcher("on 7/11"); named.find(); System.out.println(named.group("mon") + "-" + named.group("day"));
+        System.out.println(Pattern.compile("hello", Pattern.CASE_INSENSITIVE).matcher("Say HELLO").find() + " " + Pattern.matches("[a-z]+", "abc") + " " + "x".repeat(3).replaceFirst("x", "y") + " " + Pattern.compile(",").splitAsStream("a,b").toList());
+        StringTokenizer st = new StringTokenizer("a b  c", " "); int n = 0; while (st.hasMoreTokens()) { st.nextToken(); n++; } System.out.println(n + " " + "Ünïcödé".toLowerCase() + " " + "straße".toUpperCase() + " " + "ﬁ".length());
+        System.out.println(new String("héllo €".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8) + " " + "héllo €".getBytes(StandardCharsets.UTF_8).length + " " + "héllo".getBytes(StandardCharsets.ISO_8859_1).length);
+        System.out.println(String.format(Locale.GERMANY, "%,.2f", 1234567.891) + " " + String.format(Locale.FRANCE, "%,d", 1234567).replace(' ', '_').replace(' ', '~'));
+    }
+}
+</script>
+<script type="text/plain" data-out="B8">
+[asha at site [5], ben at corp [22]]
+true a<1>b<22>c<333> [one, two, three]
+11-7
+true true yxx [a, b]
+3 ünïcödé STRASSE 1
+héllo € 10 5
+1.234.567,89 1_234_567
+</script>
+
+<script type="text/x-java" data-id="B9" data-name="Concurrency: synchronized, executors, futures, CompletableFuture, latch, barrier, semaphore, queues, virtual threads">
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+public class Main {
+    static int safeCount = 0;
+    static synchronized void incSafe() { safeCount++; }
+    static volatile boolean running = true;
+    public static void main(String[] args) throws Exception {
+        Thread[] ts = new Thread[4];
+        for (int i = 0; i < 4; i++) { ts[i] = new Thread(() -> { for (int j = 0; j < 10000; j++) incSafe(); }, "w" + i); ts[i].start(); }
+        for (Thread t : ts) t.join();
+        System.out.println("synchronized: " + safeCount);
+        AtomicLong al = new AtomicLong(); ExecutorService pool = Executors.newFixedThreadPool(3);
+        List<Future<Integer>> fs = new ArrayList<>(); for (int i = 1; i <= 5; i++) { int k = i; fs.add(pool.submit(() -> { al.addAndGet(k); return k * k; })); }
+        int sum = 0; for (Future<Integer> f : fs) sum += f.get(); pool.shutdown(); System.out.println(pool.awaitTermination(2, TimeUnit.SECONDS) + " " + sum + " " + al.get());
+        List<Callable<String>> jobs = List.of(() -> "a", () -> "b"); ExecutorService p2 = Executors.newCachedThreadPool(); System.out.println(p2.invokeAll(jobs).stream().map(f -> { try { return f.get(); } catch (Exception e) { return "?"; } }).toList()); p2.shutdown();
+        CompletableFuture<Integer> cf = CompletableFuture.supplyAsync(() -> 6).thenApplyAsync(x -> x * 7).thenCombine(CompletableFuture.completedFuture(1), Integer::sum);
+        System.out.println(cf.get() + " " + CompletableFuture.supplyAsync(() -> { if (true) throw new IllegalStateException("boom"); return "x"; }).exceptionally(e -> e.getCause().getMessage()).join());
+        CountDownLatch latch = new CountDownLatch(3); for (int i = 0; i < 3; i++) new Thread(latch::countDown).start(); latch.await(); System.out.println("latch " + latch.getCount());
+        CyclicBarrier barrier = new CyclicBarrier(2, () -> System.out.println("barrier tripped")); Thread bt = new Thread(() -> { try { barrier.await(); } catch (Exception e) {} }); bt.start(); barrier.await(); bt.join();
+        Semaphore sem = new Semaphore(2); sem.acquire(); System.out.println("permits " + sem.availablePermits() + " " + sem.tryAcquire() + " " + sem.tryAcquire());
+        BlockingQueue<Integer> q = new LinkedBlockingQueue<>(); Thread prod = new Thread(() -> { for (int i = 1; i <= 3; i++) q.add(i); q.add(-1); }); prod.start(); int got = 0, v; while ((v = q.take()) != -1) got += v; System.out.println("queue " + got);
+        ConcurrentHashMap<String, Integer> chm = new ConcurrentHashMap<>(); chm.merge("k", 1, Integer::sum); chm.computeIfAbsent("z", x -> 26); System.out.println(new TreeMap<>(chm) + " " + new CopyOnWriteArrayList<>(List.of(1, 2)));
+        ThreadLocal<Integer> tl = ThreadLocal.withInitial(() -> 5); Thread tt = new Thread(() -> tl.set(9)); tt.start(); tt.join(); System.out.println("threadlocal " + tl.get());
+        Thread sleeper = new Thread(() -> { try { Thread.sleep(10000); System.out.println("not here"); } catch (InterruptedException e) { System.out.println("interrupted"); } }); sleeper.start(); sleeper.interrupt(); sleeper.join();
+        Thread d = new Thread(() -> {}); d.setDaemon(true); System.out.println("daemon " + d.isDaemon() + " " + Thread.currentThread().getName());
+        Thread worker = new Thread(() -> { while (running) Thread.onSpinWait(); }); worker.start(); running = false; worker.join(); System.out.println("volatile stop");
+        try (ExecutorService vt = Executors.newVirtualThreadPerTaskExecutor()) { List<Future<Integer>> vf = new ArrayList<>(); for (int i = 0; i < 100; i++) { int k = i; vf.add(vt.submit(() -> k)); } int s = 0; for (var f : vf) s += f.get(); System.out.println("virtual " + s); }
+        Thread v1 = Thread.ofVirtual().start(() -> {}); v1.join(); System.out.println(v1.isVirtual());
+        System.out.println(ForkJoinPool.commonPool().invoke(new RecursiveTask<Long>() { protected Long compute() { return 21L * 2; } }));
+    }
+}
+</script>
+<script type="text/plain" data-out="B9">
+synchronized: 40000
+true 55 15
+[a, b]
+43 boom
+latch 0
+barrier tripped
+permits 1 true false
+queue 6
+{k=1, z=26} [1, 2]
+threadlocal 5
+interrupted
+daemon true main
+volatile stop
+virtual 4950
+true
+42
+</script>
+
+<script type="text/x-java" data-id="B9b" data-name="Concurrency: locks (ReentrantLock, Condition, ReadWriteLock)" data-bug="5">
+import java.util.concurrent.locks.*;
+public class Main {
+    public static void main(String[] args) throws Exception {
+        ReentrantLock lock = new ReentrantLock(); Condition ready = lock.newCondition(); int[] box = {0};
+        Thread t = new Thread(() -> { lock.lock(); try { box[0] = 7; ready.signal(); } finally { lock.unlock(); } });
+        lock.lock(); try { t.start(); while (box[0] == 0) ready.await(); System.out.println("got " + box[0] + " " + lock.isHeldByCurrentThread()); } finally { lock.unlock(); }
+        ReadWriteLock rw = new ReentrantReadWriteLock(); rw.readLock().lock(); rw.readLock().unlock(); System.out.println("rw ok");
+    }
+}
+</script>
+<script type="text/plain" data-out="B9b">
+got 7 true
+rw ok
+</script>
+
+<script type="text/x-java" data-id="B9c" data-name="Concurrency: an uncaught exception in another thread" data-bug="4" data-err="Exception in thread &quot;worker-1&quot; java.lang.RuntimeException: worker failed">
+public class Main { public static void main(String[] a) throws Exception { Thread t = new Thread(() -> { throw new RuntimeException("worker failed"); }, "worker-1"); t.start(); t.join(); System.out.println("main goes on"); } }
+</script>
+<script type="text/plain" data-out="B9c">
+main goes on
+</script>
+
+<script type="text/x-java" data-id="B10" data-name="Reflection: Class.forName, constructors, fields, private methods, Proxy, records">
+import java.lang.reflect.*;
+import java.util.*;
+public class Main {
+    public static class Person { private String name = "Kim"; public int age = 30; public Person() {} public Person(String n) { name = n; } public String hello(String to) { return name + " greets " + to; } private int secret() { return 42; } }
+    interface Greeter { String greet(String n); }
+    record R(int a, String b) {}
+    public static void main(String[] args) throws Exception {
+        Class<?> c = Class.forName("Main$Person");
+        System.out.println(c.getName() + " " + c.getSimpleName() + " " + c.getSuperclass().getSimpleName() + " " + Modifier.isPublic(c.getModifiers()) + " " + Modifier.isStatic(c.getModifiers()));
+        Object p = c.getConstructor(String.class).newInstance("Lee");
+        System.out.println(c.getMethod("hello", String.class).invoke(p, "you"));
+        Field f = c.getDeclaredField("name"); f.setAccessible(true); f.set(p, "Max"); System.out.println(f.get(p) + " " + c.getField("age").getInt(p));
+        Method s = c.getDeclaredMethod("secret"); s.setAccessible(true); System.out.println(s.invoke(p) + " " + Modifier.isPrivate(s.getModifiers()));
+        List<String> ms = new ArrayList<>(); for (Method m : c.getDeclaredMethods()) ms.add(m.getName()); Collections.sort(ms); System.out.println(ms + " " + c.getDeclaredConstructors().length + " " + c.getDeclaredFields().length);
+        Greeter g = (Greeter) Proxy.newProxyInstance(Main.class.getClassLoader(), new Class<?>[] {Greeter.class}, (proxy, method, a) -> method.getName() + "(" + a[0] + ")");
+        System.out.println(g.greet("Zoe") + " " + int[].class.getName() + " " + String[].class.getSimpleName() + " " + int.class + " " + Integer.TYPE);
+        System.out.println(Arrays.stream(R.class.getRecordComponents()).map(rc -> rc.getName() + ":" + rc.getType().getSimpleName()).toList() + " " + R.class.isRecord());
+    }
+}
+</script>
+<script type="text/plain" data-out="B10">
+Main$Person Person Object true true
+Lee greets you
+Max 30
+42 true
+[hello, secret] 2 2
+greet(Zoe) [I String[] int int
+[a:int, b:String] true
+</script>
+
+<script type="text/x-java" data-id="B11" data-name="Runtime: memory, properties, environment, weak references, arraycopy, System.exit" data-code="5">
+public class Main {
+    public static void main(String[] args) throws Exception {
+        Runtime rt = Runtime.getRuntime();
+        System.out.println((rt.availableProcessors() >= 1) + " " + (rt.maxMemory() > 0) + " " + (rt.totalMemory() >= rt.freeMemory()));
+        System.out.println(System.getProperty("java.version") + "|" + System.getProperty("user.dir") + "|" + System.getProperty("line.separator").length() + "|" + (System.getProperty("os.name") != null) + "|" + System.lineSeparator().equals("\n"));
+        System.out.println(System.getenv("NOPE") + " " + (System.getenv() != null));
+        Object o = new Object(); java.lang.ref.WeakReference<Object> w = new java.lang.ref.WeakReference<>(o); System.out.println((w.get() == o) + " " + (System.identityHashCode(o) == o.hashCode()));
+        System.gc(); System.out.println("gc ok " + Runtime.version().feature());
+        int[] src = {1, 2, 3, 4}; int[] dst = new int[4]; System.arraycopy(src, 1, dst, 0, 3); System.out.println(java.util.Arrays.toString(dst));
+        System.exit(5);
+    }
+}
+</script>
+<script type="text/plain" data-out="B11">
+true true true
+23.0.2|/home/student|1|true|true
+null true
+true true
+gc ok 23
+[2, 3, 4, 0]
+</script>
+
+<script type="text/x-java" data-id="B12" data-name="Utilities: Iterable of your own, clone, Objects, Optional, UUID, Base64, HexFormat, Properties, Timer, BitSet">
+import java.util.*;
+public class Main {
+    static class Range implements Iterable<Integer> { final int lo, hi; Range(int lo, int hi) { this.lo = lo; this.hi = hi; } public Iterator<Integer> iterator() { return new Iterator<>() { int c = lo; public boolean hasNext() { return c < hi; } public Integer next() { if (!hasNext()) throw new NoSuchElementException(); return c++; } }; } }
+    static class Sheep implements Cloneable { String name; List<String> tags = new ArrayList<>(); Sheep(String n) { name = n; } @Override public Sheep clone() { try { return (Sheep) super.clone(); } catch (CloneNotSupportedException e) { throw new AssertionError(); } } }
+    public static void main(String[] args) throws Exception {
+        for (int i : new Range(1, 4)) System.out.print(i + ";"); System.out.println();
+        Sheep a = new Sheep("Dolly"); a.tags.add("white"); Sheep b = a.clone(); b.name = "Molly"; b.tags.add("cloned");
+        System.out.println(a.name + " " + a.tags + " " + b.name + " " + (a.tags == b.tags));
+        System.out.println(Objects.equals(null, null) + " " + Objects.hash(1, 2, 3) + " " + Objects.requireNonNullElse(null, "dflt") + " " + Objects.toString(null, "-") + " " + Objects.isNull(a));
+        try { Objects.requireNonNull(null, "name must not be null"); } catch (NullPointerException e) { System.out.println(e.getMessage()); }
+        Optional<String> o = Optional.ofNullable(null); System.out.println(o.orElseGet(() -> "gen") + " " + Optional.of(5).filter(x -> x > 3).map(x -> x * 2).get() + " " + o.or(() -> Optional.of("alt")).get() + " " + Optional.of("v").stream().count());
+        System.out.println(UUID.fromString("123e4567-e89b-12d3-a456-426614174000").version() + " " + UUID.randomUUID().toString().length() + " " + new String(Base64.getDecoder().decode("SmF2YQ==")) + " " + Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[] {-5, -1}) + " " + HexFormat.of().withUpperCase().formatHex(new byte[] {(byte) 0xCA, (byte) 0xFE}));
+        Properties props = new Properties(); props.load(new java.io.StringReader("host=localhost\nport = 8080\n# comment\n")); System.out.println(props.getProperty("port") + " " + props.getProperty("user", "guest") + " " + props.size());
+        Timer timer = new Timer(); final int[] ticks = {0}; timer.scheduleAtFixedRate(new TimerTask() { public void run() { ticks[0]++; } }, 0, 20); Thread.sleep(130); timer.cancel(); System.out.println("timer " + (ticks[0] >= 4 && ticks[0] <= 9));
+        BitSet bs = new BitSet(); bs.set(1); bs.set(5); bs.set(3, 5); System.out.println(bs + " " + bs.cardinality());
+    }
+}
+</script>
+<script type="text/plain" data-out="B12">
+1;2;3;
+Dolly [white, cloned] Molly true
+true 30817 dflt - false
+name must not be null
+gen 10 alt 1
+1 36 Java -_8 CAFE
+8080 guest 2
+timer true
+{1, 3, 4, 5} 4
+</script>
+
+<script type="text/x-java" data-id="B13" data-name="Networking: URI / URL parsing, URL encoding, loopback address">
+import java.net.*;
+public class Main {
+    public static void main(String[] args) throws Exception {
+        URI u = new URI("https://example.com:8080/path/page?q=java&x=1#top");
+        System.out.println(u.getScheme() + " " + u.getHost() + " " + u.getPort() + " " + u.getPath() + " " + u.getQuery() + " " + u.getFragment());
+        System.out.println(URLEncoder.encode("a b&c=d/é", "UTF-8") + " " + URLDecoder.decode("x%20y%2Bz", "UTF-8") + " " + new URL("http://a.org/x/y.html").getFile() + " " + u.resolve("../img.png"));
+        System.out.println(InetAddress.getByName("127.0.0.1").isLoopbackAddress());
+    }
+}
+</script>
+<script type="text/plain" data-out="B13">
+https example.com 8080 /path/page q=java&x=1 top
+a+b%26c%3Dd%2F%C3%A9 x y+z /x/y.html https://example.com:8080/img.png
+true
+</script>
+
+<script type="text/x-java" data-id="B13b" data-name="Networking: a server and a client on localhost (needs our loopback emulation)">
+import java.io.*;
+import java.net.*;
+public class Main {
+    public static void main(String[] args) throws Exception {
+        try (ServerSocket server = new ServerSocket(5050)) {
+            Thread client = new Thread(() -> { try (Socket s = new Socket("localhost", 5050); PrintWriter out = new PrintWriter(s.getOutputStream(), true); BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()))) { out.println("ping"); System.out.println("client got " + in.readLine()); } catch (IOException e) { System.out.println("client " + e); } });
+            client.start();
+            try (Socket c = server.accept(); BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream())); PrintWriter out = new PrintWriter(c.getOutputStream(), true)) { System.out.println("server got " + in.readLine()); out.println("pong"); }
+            client.join();
+        }
+    }
+}
+</script>
+<script type="text/plain" data-out="B13b">
+server got ping
+client got pong
+</script>
+
+<script type="module">
+  import { createJava } from "./java-engine.js";
+  const out = document.getElementById("out");
+  const say = (s) => { out.textContent += s + "\n"; };
+  const only = new URLSearchParams(location.search).get("only");
+  const want = only ? new Set(only.split(",")) : null;
+  // ?rt=<folder under vendor/> runs the checks on another runtime build (e.g. tracejvm-fork-3/runtime); default 0.4.1.
+  const rt = new URLSearchParams(location.search).get("rt") || "tracejvm-0.4.1/runtime";
+  const BASE = new URL(`./vendor/${rt}/`, location.href).href;
+  const enc = new TextEncoder();
+  const text = (el) => (el ? el.textContent.replace(/^\n/, "") : "");
+  const results = [];
+  try {
+    const java = createJava({ base: BASE });
+    const t0 = performance.now();
+    await java.ready;
+    say(`INFO engine ready ${Math.round(performance.now() - t0)} ms`);
+    for (const el of document.querySelectorAll('script[type="text/x-java"]')) {
+      const id = el.dataset.id;
+      if (want && !want.has(id)) continue;
+      const expect = text(document.querySelector(`script[data-out="${id}"]`));
+      const c = await java.compile({ "Main.java": text(el) });
+      if (!c.ok) {
+        say(`FAIL ${id} ${el.dataset.name}${el.dataset.bug ? ` (TraceJVM bug ${el.dataset.bug})` : ""}\n   does not compile: ${c.stderr.split("\n").slice(0, 4).join(" | ")}`);
+        results.push([id, false]); continue;
+      }
+      const lines = el.dataset.input != null ? el.dataset.input.split("|") : [];
+      const files = Object.fromEntries(Object.entries(el.dataset.files ? JSON.parse(el.dataset.files) : {}).map(([k, v]) => [k, enc.encode(v)]));
+      let stdout = "", stderr = "";
+      const r = await java.run(c.program, { files, onOut: (t) => { stdout += t; }, onErr: (t) => { stderr += t; },
+        readLine: () => new Promise((res) => setTimeout(() => res(lines.length ? lines.shift() : null), 5)), timeLimitMs: 20000 });
+      const code = +(el.dataset.code || 0), errStart = el.dataset.err || "";
+      const ok = stdout === expect && r.code === code && stderr.startsWith(errStart) && (errStart || !stderr);
+      results.push([id, ok]);
+      say(`${ok ? "PASS" : "FAIL"} ${id} ${el.dataset.name}${!ok && el.dataset.bug ? ` (TraceJVM bug ${el.dataset.bug})` : ""}  [compile ${c.ms} ms, run ${r.ms} ms]`);
+      if (!ok) {
+        const g = stdout.split("\n"), e = expect.split("\n");
+        for (let i = 0; i < Math.max(g.length, e.length); i++) if (g[i] !== e[i]) say(`   line ${i + 1}\n     JDK  ${JSON.stringify(e[i])}\n     here ${JSON.stringify(g[i])}`);
+        if (r.code !== code) say(`   exit code ${r.code} (JDK: ${code}) ${r.error || ""}`);
+        if (!stderr.startsWith(errStart) || (!errStart && stderr)) say(`   stderr ${JSON.stringify(stderr.slice(0, 700))}`);
+      }
+    }
+  } catch (e) {
+    say(`FAIL ${e && `${e.name}: ${e.message}${e.cause ? ` (cause: ${e.cause.message || e.cause})` : ""}\n${e.stack || ""}` || e}`);
+  }
+  const passed = results.filter(([, ok]) => ok).length;
+  say(`INFO ${passed} of ${results.length} rows pass; failing: ${results.filter(([, ok]) => !ok).map(([id]) => id).join(", ") || "none"}`);
+  say("DONE");
+</script></body></html>
