@@ -1370,6 +1370,28 @@ static void parse_attribute(cf_byteslice *reader, classfile_parse_ctx *ctx, attr
                                   ->class_info;
       entries[i] = entry;
     }
+  } else if (utf8_equals(attr->name, "Record")) {
+    // JVMS 4.7.30 (Shiklo fork, 2026-10-28): each component's name, descriptor and own attributes.
+    attr->kind = ATTRIBUTE_KIND_RECORD;
+    int count = attr->record.count = reader_next_u16(&attr_reader, "record components count");
+    record_component *components = attr->record.components =
+        arena_alloc(ctx->arena, count, sizeof(record_component));
+    for (int i = 0; i < count; ++i) {
+      record_component *component = components + i;
+      component->name =
+          checked_cp_entry(ctx->cp, reader_next_u16(&attr_reader, "record component name"), CP_KIND_UTF8,
+                           "record component name")
+              ->utf8;
+      component->descriptor =
+          checked_cp_entry(ctx->cp, reader_next_u16(&attr_reader, "record component descriptor"), CP_KIND_UTF8,
+                           "record component descriptor")
+              ->utf8;
+      component->attributes_count = reader_next_u16(&attr_reader, "record component attributes count");
+      component->attributes = arena_alloc(ctx->arena, component->attributes_count, sizeof(attribute));
+      for (int j = 0; j < component->attributes_count; ++j) {
+        parse_attribute(&attr_reader, ctx, component->attributes + j);
+      }
+    }
   } else if (utf8_equals(attr->name, "SourceFile")) {
     attr->kind = ATTRIBUTE_KIND_SOURCE_FILE;
     attr->source_file.name =
@@ -1738,6 +1760,8 @@ parse_result_t parse_classfile(const u8 *bytes, size_t len, classdesc *result, h
       cf->nest_host = attr->nest_host;
     } else if (attr->kind == ATTRIBUTE_KIND_INNER_CLASSES) {
       cf->inner_classes = &attr->inner_classes;
+    } else if (attr->kind == ATTRIBUTE_KIND_RECORD) {
+      cf->record = &attr->record;
     }
   }
 

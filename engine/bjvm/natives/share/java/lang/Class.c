@@ -523,3 +523,85 @@ DECLARE_NATIVE("java/lang", Class, getGenericSignature0, "()Ljava/lang/String;")
 DECLARE_NATIVE("java/lang", Class, getProtectionDomain0, "()Ljava/security/ProtectionDomain;") {
   return value_null(); // TODO
 }
+
+// Records (Shiklo fork, 2026-10-28): both natives were missing, so Class.isRecord(), getRecordComponents() and the
+// serialization of records threw UnsatisfiedLinkError. They read the Record attribute (vm/classfile.c).
+DECLARE_NATIVE("java/lang", Class, isRecord0, "()Z") {
+  classdesc *desc = unmirror_class(obj->obj);
+  return (stack_value){.i = desc->record != nullptr};
+}
+
+// One RecordComponent per component, filled as HotSpot does: clazz, name, type, accessor, signature, annotations,
+// typeAnnotations.
+DECLARE_NATIVE("java/lang", Class, getRecordComponents0, "()[Ljava/lang/reflect/RecordComponent;") {
+  classdesc *desc = unmirror_class(obj->obj);
+  attribute_record *record = desc->record;
+  if (!record)
+    return value_null();
+  classdesc *RecordComponent = bootstrap_lookup_class(thread, STR("java/lang/reflect/RecordComponent"));
+  if (!RecordComponent)
+    return value_null();
+  link_class(thread, RecordComponent);
+  handle *array = make_handle(thread, CreateObjectArray1D(thread, RecordComponent, record->count));
+  for (int i = 0; array->obj && i < record->count && !thread->current_exception; ++i) {
+    record_component *component = record->components + i;
+    handle *rc = make_handle(thread, new_object(thread, RecordComponent));
+    if (!rc->obj) {
+      drop_handle(thread, rc);
+      break;
+    }
+    ReferenceArrayStore(array->obj, i, rc->obj);
+    StoreFieldObject(rc->obj, "java/lang/Class", "clazz", (obj_header *)get_class_mirror(thread, desc));
+    StoreFieldObject(rc->obj, "java/lang/String", "name", MakeJStringFromModifiedUTF8(thread, component->name, true));
+
+    load_class_of_field_descriptor_t load = {.args = {thread, desc->classloader, component->descriptor}};
+    thread->stack.synchronous_depth++;
+    future_t loaded = load_class_of_field_descriptor(&load);
+    CHECK(loaded.status == FUTURE_READY);
+    thread->stack.synchronous_depth--;
+    if (load._result)
+      StoreFieldObject(rc->obj, "java/lang/Class", "type", (obj_header *)get_class_mirror(thread, load._result));
+
+    // The accessor: the no-argument method of the component's name that returns its type.
+    char *accessor_descriptor = malloc(component->descriptor.len + 2);
+    if (accessor_descriptor) {
+      accessor_descriptor[0] = '(';
+      accessor_descriptor[1] = ')';
+      memcpy(accessor_descriptor + 2, component->descriptor.chars, component->descriptor.len);
+      cp_method *accessor = method_lookup(
+          desc, component->name, (slice){.chars = accessor_descriptor, .len = component->descriptor.len + 2}, false,
+          false);
+      free(accessor_descriptor);
+      if (accessor) {
+        reflect_initialize_method_t init = {.args = {thread, desc, accessor}};
+        thread->stack.synchronous_depth++;
+        future_t initialized = reflect_initialize_method(&init);
+        CHECK(initialized.status == FUTURE_READY);
+        thread->stack.synchronous_depth--;
+        StoreFieldObject(rc->obj, "java/lang/reflect/Method", "accessor", (obj_header *)accessor->reflection_method);
+      }
+    }
+
+    for (int j = 0; j < component->attributes_count; ++j) {
+      attribute *attr = component->attributes + j;
+      if (attr->kind == ATTRIBUTE_KIND_SIGNATURE) {
+        StoreFieldObject(rc->obj, "java/lang/String", "signature",
+                         MakeJStringFromModifiedUTF8(thread, attr->signature.utf8, true));
+      } else if (attr->kind == ATTRIBUTE_KIND_RUNTIME_VISIBLE_ANNOTATIONS ||
+                 attr->kind == ATTRIBUTE_KIND_RUNTIME_VISIBLE_TYPE_ANNOTATIONS) {
+        bool type = attr->kind == ATTRIBUTE_KIND_RUNTIME_VISIBLE_TYPE_ANNOTATIONS;
+        u8 *data = type ? attr->type_annotations.data : attr->annotations.data;
+        int length = type ? attr->type_annotations.length : attr->annotations.length;
+        obj_header *bytes = CreatePrimitiveArray1D(thread, TYPE_KIND_BYTE, length);
+        if (bytes) {
+          memcpy(ArrayData(bytes), data, length);
+          __StoreFieldObject(rc->obj, STR("[B"), type ? STR("typeAnnotations") : STR("annotations"), bytes);
+        }
+      }
+    }
+    drop_handle(thread, rc);
+  }
+  obj_header *result = thread->current_exception ? nullptr : array->obj;
+  drop_handle(thread, array);
+  return (stack_value){.obj = result};
+}

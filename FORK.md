@@ -30,6 +30,9 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: records — the class-file parser reads the Record attribute (`vm/classfile.c`, `vm/classfile.h`), and
+  `Class.isRecord0` / `getRecordComponents0` are implemented (`natives/share/java/lang/Class.c`); they were missing,
+  so `isRecord()`, `getRecordComponents()` and record serialization threw UnsatisfiedLinkError.
 - 2026-10-28: name lookup and network interfaces (`natives/share/java/net/InetAddressImpl.c`, new): "localhost" is
   127.0.0.1, other names are an UnknownHostException (there is no DNS in a browser tab), NetworkInterface reports
   none. The natives were missing, so `InetAddress.getByName("localhost")` aborted the VM and `UUID.randomUUID()` /

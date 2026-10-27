@@ -518,6 +518,7 @@ typedef enum {
   ATTRIBUTE_KIND_STACK_MAP_TABLE,
   ATTRIBUTE_KIND_INNER_CLASSES,
   ATTRIBUTE_KIND_PERMITTED_SUBCLASSES,
+  ATTRIBUTE_KIND_RECORD,
 } attribute_kind;
 
 typedef struct method_descriptor {
@@ -729,6 +730,20 @@ typedef struct {
   cp_class_info **entries;
 } attribute_permitted_subclasses;
 
+// The Record attribute (JVMS 4.7.30): one entry per record component, with its own attributes (Signature,
+// annotations). Read by Class.isRecord0 / getRecordComponents0 (Shiklo fork, 2026-10-28).
+typedef struct {
+  slice name;
+  slice descriptor;
+  int attributes_count;
+  struct attribute *attributes;
+} record_component;
+
+typedef struct {
+  u16 count;
+  record_component *components;
+} attribute_record;
+
 typedef struct attribute {
   attribute_kind kind;
   slice name;
@@ -751,6 +766,7 @@ typedef struct attribute {
     attribute_stack_map_table smt;
     attribute_inner_classes inner_classes;
     attribute_permitted_subclasses permitted_subclasses;
+    attribute_record record;
     cp_class_info *nest_host;
   };
 } attribute;
@@ -877,6 +893,7 @@ typedef struct classdesc {
 
   attribute_source_file *source_file;
   attribute_inner_classes *inner_classes;
+  attribute_record *record; // the Record attribute, or nullptr: not a record class
 
   attribute *attributes;
   classdesc *array_type;
