@@ -137,7 +137,18 @@ DECLARE_NATIVE("java/lang", Class, getComponentType, "()Ljava/lang/Class;") {
 
 DECLARE_NATIVE("java/lang", Class, getModifiers, "()I") {
   classdesc *classdesc = unmirror_class(obj->obj);
-  return (stack_value){.i = classdesc->access_flags};
+  int flags = classdesc->access_flags;
+  // As HotSpot: a member class takes its flags from its InnerClasses entry (static, private, protected), and ACC_SUPER
+  // (the same bit as synchronized) is never reported (Shiklo fork, 2026-10-28).
+  attribute_inner_classes *inner = classdesc->inner_classes;
+  for (int i = 0; inner && i < inner->count; ++i) {
+    inner_class_entry *entry = &inner->classes[i];
+    if (entry->inner_class && utf8_equals_utf8(entry->inner_class->name, classdesc->name)) {
+      flags = entry->access_flags;
+      break;
+    }
+  }
+  return (stack_value){.i = flags & ~ACCESS_SYNCHRONIZED & 0x7FFF};
 }
 
 DECLARE_NATIVE("java/lang", Class, getSuperclass, "()Ljava/lang/Class;") {
@@ -254,7 +265,9 @@ oom:
 }
 
 DECLARE_NATIVE("java/lang", Class, desiredAssertionStatus0, "(Ljava/lang/Class;)Z") {
-  return (stack_value){.i = 1}; // TODO add thread option
+  // Assertions are off unless asked for, as in the JDK; `java -ea` is honoured by the launcher through
+  // ClassLoader.setDefaultAssertionStatus (Shiklo fork, 2026-10-28; was always on).
+  return (stack_value){.i = 0};
 }
 
 bool include_field(const cp_field *field, bool public_only) {

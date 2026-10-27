@@ -158,7 +158,17 @@ s64 micros() {
 #endif
 }
 
-DECLARE_NATIVE("java/lang", System, currentTimeMillis, "()J") { return (stack_value){.l = micros() / 1000}; }
+// Wall clock (microseconds since 1970). micros() above is monotonic: in the browser it counts from the worker's start
+// (performance.now), right for nanoTime but not for the time of day (Shiklo fork, 2026-10-28).
+s64 wall_micros() {
+#ifdef EMSCRIPTEN
+  return (s64)(emscripten_date_now() * 1000);
+#else
+  return micros();
+#endif
+}
+
+DECLARE_NATIVE("java/lang", System, currentTimeMillis, "()J") { return (stack_value){.l = wall_micros() / 1000}; }
 
 int calls = 0;
 DECLARE_NATIVE("java/lang", System, nanoTime, "()J") { return (stack_value){.l = micros() * 1000}; }

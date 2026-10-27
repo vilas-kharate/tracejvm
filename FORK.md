@@ -11,4 +11,12 @@ THIRD_PARTY_NOTICES.md).
 
 ## Changes
 
-- 2026-10-28: added the runtime build workflow and this file. No engine change yet.
+- 2026-10-28: added the runtime build workflow and this file.
+- 2026-10-28: wall clock — `System.currentTimeMillis()` read the worker's monotonic clock (time since the worker
+  started, so programs saw 1970) and `VM.getNanoTimeAdjustment` returned 0 (`Instant.now()` never moved); both now
+  read the time of day (`Date.now()`), `System.nanoTime()` stays monotonic
+  (`natives/share/java/lang/System.c`, `natives/share/sun/misc/VM.c`).
+- 2026-10-28: assertions are off by default, as in the JDK (`Class.desiredAssertionStatus0` returned true);
+  `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`).
+- 2026-10-28: `Class.getModifiers()` of a member class comes from its InnerClasses entry (so `static`, `private`,
+  `protected` show), and ACC_SUPER is no longer reported (`natives/share/java/lang/Class.c`).
