@@ -127,7 +127,7 @@ jar --create --date="$archive_date" \
   -C "$build_root/tracekernel-api" .
 # The java.base descriptor TeaVM javac compiles against (scripts/java/PlatformDescriptor.java; Shiklo fork).
 javac \
-  --add-exports java.base/jdk.internal.module=ALL-UNNAMED \
+  --release 23 --enable-preview \
   -d "$build_root/platform-descriptor" \
   "$repo_root/scripts/java/PlatformDescriptor.java"
 runtime_modules_for_profile() {
@@ -199,7 +199,7 @@ for profile in core server spring-server; do
   # TeaVM javac takes java.base's packages from a module-info.class; without this one it used the TeaVM class
   # library's, which lacks java.util.concurrent.locks and every module outside java.base. Added with zipfile, not jar
   # (jar would treat a root module-info.class as a modular jar and check it) (Shiklo fork, 2026-10-28).
-  java --add-exports java.base/jdk.internal.module=ALL-UNNAMED \
+  java --enable-preview \
     -cp "$build_root/platform-descriptor" PlatformDescriptor \
     "$profile_modules" "jdk.internal.tracecode" "$profile_build_root/module-info.class"
   python3 - "$profile_jar" "$profile_build_root/module-info.class" <<'PYTHON'

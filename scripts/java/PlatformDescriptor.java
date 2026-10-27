@@ -1,10 +1,16 @@
-import java.io.FileOutputStream;
-import java.io.OutputStream;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.attribute.ModuleAttribute;
+import java.lang.classfile.attribute.ModulePackagesAttribute;
+import java.lang.constant.ModuleDesc;
+import java.lang.constant.PackageDesc;
 import java.lang.module.ModuleDescriptor;
 import java.lang.module.ModuleFinder;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import jdk.internal.module.ModuleInfoWriter;
 
 /**
  * Writes the java.base module-info.class that TeaVM javac compiles against for one runtime profile.
@@ -15,7 +21,7 @@ import jdk.internal.module.ModuleInfoWriter;
  * export without qualification (internal packages stay hidden, as with a real JDK) and lists every package the jar
  * holds. It is read by the compiler only; the runner keeps the real modules.
  *
- * <p>Usage: java --add-exports java.base/jdk.internal.module=ALL-UNNAMED PlatformDescriptor
+ * <p>Written with the ClassFile API (a preview in JDK 23). Usage: java --enable-preview PlatformDescriptor
  * module1,module2,... extraPackage1,extraPackage2,... output/module-info.class (Shiklo fork, 2026-10-28)
  */
 public final class PlatformDescriptor {
@@ -38,11 +44,17 @@ public final class PlatformDescriptor {
         packages.add(extra);
       }
     }
-    ModuleDescriptor.Builder builder = ModuleDescriptor.newModule("java.base").packages(packages);
-    exported.forEach(builder::exports);
-    try (OutputStream out = new FileOutputStream(args[2])) {
-      ModuleInfoWriter.write(builder.build(), out);
+    ModuleAttribute module = ModuleAttribute.of(ModuleDesc.of("java.base"), builder -> {
+      for (String name : exported) {
+        builder.exports(PackageDesc.of(name), 0);
+      }
+    });
+    List<PackageDesc> all = new ArrayList<>();
+    for (String name : packages) {
+      all.add(PackageDesc.of(name));
     }
+    byte[] bytes = ClassFile.of().buildModule(module, classBuilder -> classBuilder.with(ModulePackagesAttribute.ofNames(all)));
+    Files.write(Path.of(args[2]), bytes);
     System.out.println("java.base descriptor: " + exported.size() + " exported of " + packages.size() + " packages");
   }
 }
