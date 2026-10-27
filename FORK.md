@@ -26,6 +26,10 @@ THIRD_PARTY_NOTICES.md).
   `Thread.dispatchUncaughtException` on that thread before it ends (as HotSpot's `JavaThread::exit`), so uncaught
   exception handlers run and the default one prints `Exception in thread "..."`; it was dropped silently
   (`vm/roundrobin_scheduler.c`).
+- 2026-10-28: TeaVM javac compiles against a java.base descriptor made for each runtime profile
+  (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
+  export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
+  `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
 - 2026-10-28: the runtime build workflow puts the repository's TypeScript first on PATH (emcc's `--emit-tsd`).
 - 2026-10-28: assertions are off by default, as in the JDK (`Class.desiredAssertionStatus0` returned true);
   `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`).
