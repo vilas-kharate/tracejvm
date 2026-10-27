@@ -479,7 +479,9 @@ DECLARE_NATIVE("sun/nio/ch", UnixFileDispatcherImpl, read0, "(Ljava/io/FileDescr
     thread->current_exception = create_unix_exception_message(thread, message);
     return value_null();
   }
-  return (stack_value){.i = (s32)result};
+  // End of file is IOStatus.EOF (-1), as the JDK's convertReturnVal(n, reading) gives; a plain 0 made readers fail
+  // with "Underlying input stream returned zero bytes" (Shiklo fork, 2026-10-28).
+  return (stack_value){.i = result == 0 ? -1 : (s32)result};
 }
 
 DECLARE_NATIVE("sun/nio/ch", UnixFileDispatcherImpl, pread0,
@@ -499,7 +501,8 @@ DECLARE_NATIVE("sun/nio/ch", UnixFileDispatcherImpl, pread0,
     thread->current_exception = create_unix_exception_message(thread, message);
     return value_null();
   }
-  return (stack_value){.i = (s32)result};
+  // End of file is IOStatus.EOF (-1), as in read0 above.
+  return (stack_value){.i = result == 0 ? -1 : (s32)result};
 }
 
 DECLARE_NATIVE("sun/nio/ch", UnixFileDispatcherImpl, write0, "(Ljava/io/FileDescriptor;JI)I") {

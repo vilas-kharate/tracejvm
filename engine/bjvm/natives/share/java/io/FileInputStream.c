@@ -163,3 +163,43 @@ DECLARE_NATIVE("java/io", FileInputStream, available0, "()I") {
 
   return (stack_value){.i = (s32)available};
 }
+
+// length0 / position0: used by readAllBytes, readNBytes, skip and transferTo (JDK 23). Missing before, so
+// FileInputStream.readAllBytes threw UnsatisfiedLinkError (Shiklo fork, 2026-10-28). As the JDK: a closed stream is
+// "Stream Closed"; a stream that is not a regular file (keyboard, pipe) has length and position 0, which makes the
+// callers fall back to reading until the end.
+DECLARE_NATIVE("java/io", FileInputStream, length0, "()J") {
+  obj_header *fd = LoadFieldObject(obj->obj, "java/io/FileDescriptor", "fd");
+  DCHECK(fd);
+  s32 unix_fd = LoadFieldInt(fd, "fd");
+  if (unix_fd == -1) {
+    raise_vm_exception(thread, STR("java/io/IOException"), STR("Stream Closed"));
+    return value_null();
+  }
+  struct stat st;
+  if (tracejvm_host_fstat(unix_fd, &st) != 0) {
+    raise_vm_exception(thread, STR("java/io/IOException"), STR("GetLength failed"));
+    return value_null();
+  }
+  return (stack_value){.l = S_ISREG(st.st_mode) ? (s64)st.st_size : 0};
+}
+
+DECLARE_NATIVE("java/io", FileInputStream, position0, "()J") {
+  obj_header *fd = LoadFieldObject(obj->obj, "java/io/FileDescriptor", "fd");
+  DCHECK(fd);
+  s32 unix_fd = LoadFieldInt(fd, "fd");
+  if (unix_fd == -1) {
+    raise_vm_exception(thread, STR("java/io/IOException"), STR("Stream Closed"));
+    return value_null();
+  }
+  struct stat st;
+  if (tracejvm_host_fstat(unix_fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    return (stack_value){.l = 0};
+  }
+  off_t position = tracejvm_host_seek(unix_fd, 0, SEEK_CUR);
+  if (position < 0) {
+    raise_vm_exception(thread, STR("java/io/IOException"), STR("Seek failed"));
+    return value_null();
+  }
+  return (stack_value){.l = (s64)position};
+}
