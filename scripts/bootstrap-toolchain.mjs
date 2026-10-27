@@ -228,10 +228,13 @@ if (!runtimeVersion.includes(`java.runtime.version = ${manifest.buildTools.hostJ
 
 const emsdkRoot = join(buildToolchainRoot, "emsdk");
 const emsdkEnvironment = prepareEmsdk(emsdkRoot);
+// The pinned JDK goes first on PATH: build-runtime.sh calls javac, jlink and jimage by name, and jlink must be the
+// exact JDK of the modules it packs (a build host's own Java, e.g. 17 on GitHub's Ubuntu runners, was found first).
 const environment = {
   ...process.env,
   JAVA_HOME: javaHome,
   TRACEJVM_JAVA23_HOME: javaHome,
+  PATH: `${join(javaHome, "bin")}:${process.env.PATH ?? ""}`,
 };
 
 if (shouldBuild) {
