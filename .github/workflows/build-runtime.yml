@@ -39,6 +39,10 @@ jobs:
             .cache/teavm-javac
           key: tracejvm-toolchain-${{ hashFiles('runtime/manifest.json', 'compiler/teavm-javac/**', 'scripts/build-teavm-javac.sh') }}
       - run: pnpm install --frozen-lockfile
+      # emcc --emit-tsd runs `tsc` from PATH: use the repository's pinned TypeScript (5.9.3), not the runner's global
+      # one (a newer major refuses emcc's call with TS5112).
+      - name: Pinned tools first on PATH
+        run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
       # The build output goes to build.log as well, published with a failed build (Actions logs need a login to read).
       - name: Bootstrap JDK 23 + Emscripten 4.0.2, build javac and the runtime
         run: |
