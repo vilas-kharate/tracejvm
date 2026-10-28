@@ -105,15 +105,22 @@ performance.now = () => origin + now();
   const worker = () => new Worker(workerUrl, { type: "module" });
   let T, compiler, runner = null, host = null;
   const hostProxy = { dispatch: (req) => host.dispatch(req) };
+  // Every file TraceJVM downloads is checked against the size and SHA-256 its release lists (release.json): one map for
+  // the runner, one for the compiler (its own files, named relative to compiler/, plus the platform jar).
+  let integrity, compilerIntegrity;
   const newRunner = async () => {
     runner = new T.TraceJVMWorkerClient({ createWorker: worker, host: hostProxy, engine: {
-      assets: { runtimeProfileBaseUrls: { [profile]: base + `profiles/${profile}` }, wasmUrl: base + "bjvm_main.wasm" },
+      assets: { runtimeProfileBaseUrls: { [profile]: base + `profiles/${profile}` }, wasmUrl: base + "bjvm_main.wasm", integrity },
       runtimeProfile: profile, workingDirectory: "/home/student", hostStandardDescriptors: true } });
     await runner.initialize();
   };
   const ready = (async () => {
     T = await T0;
-    compiler = new T.TraceJVMCompilerWorkerClient({ compiler: { assets: { baseUrl: base + "compiler" }, platformArchiveUrl: base + `profiles/${profile}/jdk23.jar` }, createWorker: worker });
+    const files = (await (await fetch(base + "release.json")).json()).files;
+    integrity = T.createTraceJVMAssetIntegrityMap(base, files);
+    compilerIntegrity = Object.freeze({ ...integrity, ...T.createTraceJVMAssetIntegrityMap(base + "compiler",
+      files.filter((f) => f.path.startsWith("compiler/")).map((f) => ({ ...f, path: f.path.slice("compiler/".length) }))) });
+    compiler = new T.TraceJVMCompilerWorkerClient({ compiler: { assets: { baseUrl: base + "compiler", integrity: compilerIntegrity }, platformArchiveUrl: base + `profiles/${profile}/jdk23.jar` }, createWorker: worker });
     await Promise.all([compiler.initialize(), newRunner()]);
   })();
 
