@@ -1,0 +1,103 @@
+TraceJVM (Shiklo fork, 2026-10-28): javac constant folding with the JDK's floating point. javac runs on TeaVM,
+which compiles -x as 0.0 - x (a folded -0.0 lost its sign) and formats doubles and floats with its own
+Double.toString / Float.toString. ConstFold negates by flipping the sign bit; Type.stringValue() uses the JDK's
+jdk.internal.math conversion, copied into javac as com.sun.tools.javac.util.fp.
+
+--- a/javac/build.gradle
++++ b/javac/build.gradle
+@@ -119,4 +119,94 @@
+     source fileTree(baseSrcDir.dir("java.base/share/classes/")) {
+         include "jdk/internal/jmod/**"
+     }
++}
++
++// TraceJVM (Shiklo fork, 2026-10-28): javac runs on TeaVM, so its constant folding used TeaVM's floating point, which
++// differs from the JDK's in two places. TeaVM compiles -x as 0.0 - x, so a folded -0.0 or -0.0f lost its sign
++// (Double.compare(0.0, -0.0) gave 0). TeaVM's Double.toString and Float.toString format some values differently, and
++// javac formats folded string constants with them ("" + Double.MIN_VALUE gave 4.940656458412465E-324). After the JDK
++// sources are unpacked, ConstFold negates by flipping the sign bit, and Type.stringValue() formats doubles and floats
++// with the JDK's own conversion (jdk.internal.math), copied into javac as com.sun.tools.javac.util.fp.
++def shikloMathUtilsAdditions = '''
++    // TraceJVM (Shiklo fork): javac runs on TeaVM, whose class library has neither Math.multiplyHigh nor
++    // String(byte[], int, int, int); these are the JDK's own versions.
++    static long multiplyHigh(long x, long y) {
++        long x1 = x >> 32;
++        long x2 = x & 0xFFFFFFFFL;
++        long y1 = y >> 32;
++        long y2 = y & 0xFFFFFFFFL;
++        long z2 = x2 * y2;
++        long t = x1 * y2 + (z2 >>> 32);
++        long z1 = t & 0xFFFFFFFFL;
++        long z0 = t >> 32;
++        z1 += x2 * y1;
++        return x1 * y1 + z0 + (z1 >> 32);
++    }
++
++    static String latin1(byte[] bytes, int count) {
++        char[] chars = new char[count];
++        for (int i = 0; i < count; i++) {
++            chars[i] = (char) (bytes[i] & 0xFF);
++        }
++        return new String(chars);
++    }
++
++'''
++
++unpackJDK.configure {
++    doLast {
++        // Each text must occur exactly once, so a changed JDK source stops the build instead of being left unpatched.
++        def replaceOnce = { String text, String from, String to, String where ->
++            int at = text.indexOf(from)
++            if (at < 0 || text.indexOf(from, at + 1) >= 0) {
++                throw new GradleException("Shiklo javac patch: expected exactly one '" + from + "' in " + where)
++            }
++            return text.substring(0, at) + to + text.substring(at + from.length())
++        }
++        def edit = { String path, List<List<String>> replacements ->
++            def file = baseSrcDir.file(path).asFile
++            def text = file.getText("UTF-8")
++            for (pair in replacements) {
++                text = replaceOnce(text, pair[0], pair[1], path)
++            }
++            file.setText(text, "UTF-8")
++        }
++        edit("jdk.compiler/share/classes/com/sun/tools/javac/comp/ConstFold.java", [
++            ["Float.valueOf(-floatValue(od))",
++             "Float.valueOf(Float.intBitsToFloat(Float.floatToRawIntBits(floatValue(od)) ^ 0x80000000))"],
++            ["Double.valueOf(-doubleValue(od))",
++             "Double.valueOf(Double.longBitsToDouble(Double.doubleToRawLongBits(doubleValue(od)) ^ 0x8000000000000000L))"],
++        ])
++        edit("jdk.compiler/share/classes/com/sun/tools/javac/code/Type.java", [
++            ['''            else {
++                return cv.toString();
++            }''', '''            else if (tag == DOUBLE) {
++                return com.sun.tools.javac.util.fp.DoubleToDecimal.toString(((Number) cv).doubleValue());
++            }
++            else if (tag == FLOAT) {
++                return com.sun.tools.javac.util.fp.FloatToDecimal.toString(((Number) cv).floatValue());
++            }
++            else {
++                return cv.toString();
++            }'''],
++        ])
++        def fpDir = baseSrcDir.dir("jdk.compiler/share/classes/com/sun/tools/javac/util/fp").asFile
++        fpDir.mkdirs()
++        for (name in ["MathUtils", "DoubleToDecimal", "FloatToDecimal", "FormattedFPDecimal"]) {
++            def where = "jdk/internal/math/" + name + ".java"
++            def text = baseSrcDir.file("java.base/share/classes/" + where).asFile.getText("UTF-8")
++            text = replaceOnce(text, "package jdk.internal.math;", "package com.sun.tools.javac.util.fp;", where)
++            if (name == "DoubleToDecimal" || name == "FloatToDecimal") {
++                text = replaceOnce(text, "import static jdk.internal.math.MathUtils.*;",
++                        "import static com.sun.tools.javac.util.fp.MathUtils.*;", where)
++                text = replaceOnce(text, "import static java.lang.Math.multiplyHigh;", "", where)
++                text = replaceOnce(text, "new String(bytes, 0, 0, index + 1)", "latin1(bytes, index + 1)", where)
++            }
++            if (name == "MathUtils") {
++                int end = text.lastIndexOf("}")
++                text = text.substring(0, end) + shikloMathUtilsAdditions + text.substring(end)
++            }
++            new File(fpDir, name + ".java").setText(text, "UTF-8")
++        }
++    }
+ }
+\ No newline at end of file

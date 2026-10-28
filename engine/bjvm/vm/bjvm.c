@@ -1106,6 +1106,9 @@ DEFINE_ASYNC(resolve_method_type) {
 [[maybe_unused]] static bool mh_handle_supported(method_handle_kind kind) {
   switch (kind) {
   case MH_KIND_GET_FIELD:
+  case MH_KIND_GET_STATIC:
+  case MH_KIND_PUT_FIELD:
+  case MH_KIND_PUT_STATIC:
   case MH_KIND_INVOKE_STATIC:
   case MH_KIND_INVOKE_VIRTUAL:
   case MH_KIND_INVOKE_SPECIAL:
@@ -1123,12 +1126,20 @@ DEFINE_ASYNC(compute_mh_type_info) {
 
 #define info (self->args.info)
 #define thread (self->args.thread)
-  if (info->handle_kind == MH_KIND_GET_FIELD) {
-    // MT should be of the form (C)T, where C is the class the field is found on
-    cp_field_info *field = &info->reference->field;
-    arrput(self->ptypes, field->class_info->classdesc);
-    AWAIT(load_class_of_field_descriptor, thread, self->args.cl, field->parsed_descriptor->unparsed);
-    self->rtype = get_async_result(load_class_of_field_descriptor);
+  if (mh_is_vh(info->handle_kind)) {
+    // As the JVMS (5.4.3.5): getField (C)T, getStatic ()T, putField (C,T)V, putStatic (T)V, where C is the class the
+    // field is found on and T its type. Only getField was handled; the others aborted the VM, e.g. in a switch on a
+    // record pattern with a guard (Shiklo fork, 2026-10-28).
+    // (Locals do not survive an AWAIT: everything after it is read again from info.)
+    if (info->handle_kind == MH_KIND_GET_FIELD || info->handle_kind == MH_KIND_PUT_FIELD)
+      arrput(self->ptypes, info->reference->field.class_info->classdesc);
+    AWAIT(load_class_of_field_descriptor, thread, self->args.cl, info->reference->field.parsed_descriptor->unparsed);
+    if (info->handle_kind == MH_KIND_PUT_FIELD || info->handle_kind == MH_KIND_PUT_STATIC) {
+      arrput(self->ptypes, get_async_result(load_class_of_field_descriptor));
+      self->rtype = primitive_classdesc(thread, TYPE_KIND_VOID);
+    } else {
+      self->rtype = get_async_result(load_class_of_field_descriptor);
+    }
   } else if (info->handle_kind == MH_KIND_INVOKE_STATIC || info->handle_kind == MH_KIND_INVOKE_VIRTUAL ||
              info->handle_kind == MH_KIND_INVOKE_SPECIAL || info->handle_kind == MH_KIND_INVOKE_INTERFACE) {
     // MT should be of the form (C,A*)T, where C is the class the method is
@@ -1172,10 +1183,9 @@ DEFINE_ASYNC(compute_mh_type_info) {
 DEFINE_ASYNC(resolve_mh_mt) {
   CHECK(mh_handle_supported(args->info->handle_kind), "Unsupported method handle kind");
 
-  cp_class_info *required_type =
-      args->info->handle_kind == MH_KIND_GET_FIELD || args->info->handle_kind == MH_KIND_PUT_FIELD
-          ? args->info->reference->field.class_info
-          : args->info->reference->methodref.class_info;
+  cp_class_info *required_type = mh_is_vh(args->info->handle_kind) // field handles, static ones too
+                                     ? args->info->reference->field.class_info
+                                     : args->info->reference->methodref.class_info;
 
   resolve_class(args->thread, required_type);
   AWAIT(initialize_class, args->thread, required_type->classdesc);
@@ -1237,10 +1247,13 @@ DEFINE_ASYNC(resolve_mh_vh) {
   cp_field *f = field_lookup(field->class_info->classdesc, field->nat->name, field->nat->descriptor);
   AWAIT(reflect_initialize_field, thread, field->class_info->classdesc, f);
   handle *member = make_handle(thread, new_object(thread, MemberName));
-  cp_method *make_member = method_lookup(MemberName, STR("<init>"), STR("(Ljava/lang/reflect/Field;)V"), false, false);
+  // MemberName(Field, makeSetter): putField / putStatic handles set the field, the others read it.
+  cp_method *make_member = method_lookup(MemberName, STR("<init>"), STR("(Ljava/lang/reflect/Field;Z)V"), false, false);
+  bool setter = info->handle_kind == MH_KIND_PUT_FIELD || info->handle_kind == MH_KIND_PUT_STATIC;
 
-  call_interpreter_synchronous(thread, make_member,
-                               (stack_value[]){{.obj = (void *)member->obj}, {.obj = (void *)f->reflection_field}});
+  call_interpreter_synchronous(
+      thread, make_member,
+      (stack_value[]){{.obj = (void *)member->obj}, {.obj = (void *)f->reflection_field}, {.i = setter}});
 
   cp_method *make = method_lookup(DirectMethodHandle, STR("make"),
                                   STR("(Ljava/lang/invoke/MemberName;)Ljava/lang/"
@@ -1323,7 +1336,7 @@ DEFINE_ASYNC(resolve_method_handle) {
   }
   if (mh_is_invoke(info->handle_kind)) {
     AWAIT(resolve_mh_invoke, thread, info);
-    ASYNC_RETURN((void *)get_async_result(resolve_mh_vh));
+    ASYNC_RETURN((void *)get_async_result(resolve_mh_invoke));
   }
   UNREACHABLE();
 

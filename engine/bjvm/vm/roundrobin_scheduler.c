@@ -299,6 +299,12 @@ static thread_info *get_or_create_thread_info(impl *impl, vm_thread *thread) {
 
   thread_info *info = calloc(1, sizeof(thread_info));
   info->thread = thread;
+  // A thread with a call to run is alive again: free_thread_info cleared eetop when the host's previous call on it
+  // ended (the main thread runs runCompiled, then takeLastIsolationReport, for every program of a reused VM), so
+  // unpark of that thread was dropped and an untimed park (Future.get, Condition.await) never woke (Shiklo fork,
+  // 2026-10-28).
+  if (thread->thread_obj)
+    thread->thread_obj->eetop = (s64)(uintptr_t)thread;
   arrput(impl->round_robin, info);
   return info;
 }

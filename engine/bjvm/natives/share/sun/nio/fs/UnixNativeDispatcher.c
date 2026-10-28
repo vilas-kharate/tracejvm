@@ -215,6 +215,25 @@ DECLARE_NATIVE("sun/nio/fs", UnixNativeDispatcher, lstat0, "(JLsun/nio/fs/UnixFi
   return value_null();
 }
 
+// The file store of a path (Files.copy reads its block size; FileStore.getTotalSpace / getUsableSpace). The program's
+// files live in the page's memory: described as 1 GiB of 4 KiB blocks, 768 MiB free (Shiklo fork, 2026-10-28; it was
+// missing, so Files.copy failed with UnsatisfiedLinkError).
+DECLARE_NATIVE("sun/nio/fs", UnixNativeDispatcher, statvfs0, "(JLsun/nio/fs/UnixFileStoreAttributes;)V") {
+  struct stat st;
+  if (!args[1].handle)
+    return value_null();
+  if (tracejvm_host_stat((char *)(uintptr_t)args[0].l, &st, true)) {
+    thread->current_exception = create_unix_exception(thread, errno);
+    return value_null();
+  }
+  obj_header *attrs = args[1].handle->obj;
+  StoreFieldLong(attrs, "f_frsize", 4096);
+  StoreFieldLong(attrs, "f_blocks", 262144);
+  StoreFieldLong(attrs, "f_bfree", 196608);
+  StoreFieldLong(attrs, "f_bavail", 196608);
+  return value_null();
+}
+
 // DIR *opendir(const char* dirname)
 DECLARE_NATIVE("sun/nio/fs", UnixNativeDispatcher, opendir0, "(J)J") {
   tracejvm_host_dir *dir =

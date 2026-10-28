@@ -32,12 +32,13 @@ DECLARE_NATIVE("java/lang", Throwable, fillInStackTrace, "(I)Ljava/lang/Throwabl
     frame = frame->prev;
   }
 
-  // Count frames until base
+  // Count frames until base. As HotSpot, frames of hidden classes (lambda bodies' adapters, LambdaForms) are not shown.
   stack_frame *tmp = frame;
   int n_frames = 0;
   while (tmp) {
+    if (!tmp->method->my_class->is_hidden)
+      ++n_frames;
     tmp = tmp->prev;
-    ++n_frames;
   }
 
   // Now n_frames is the number of frames in [ frame, frame->prev, ..., first frame ]
@@ -50,6 +51,8 @@ DECLARE_NATIVE("java/lang", Throwable, fillInStackTrace, "(I)Ljava/lang/Throwabl
   ((struct native_Throwable *)obj->obj)->depth = n_frames;
 
   for (int j = 0; n_frames > 0; --n_frames, ++j) {
+    while (frame && frame->method->my_class->is_hidden)
+      frame = frame->prev;
     DCHECK(frame);
 
     // Create the stack trace element
@@ -60,12 +63,20 @@ DECLARE_NATIVE("java/lang", Throwable, fillInStackTrace, "(I)Ljava/lang/Throwabl
     cp_method *method = frame->method;
 
 #define E ((struct native_StackTraceElement *)e->obj)
-    int line = is_frame_native(frame) ? -1 : get_line_number(method->code, frame->program_counter);
+    // As HotSpot's java_lang_StackTraceElement::fill_in (Shiklo fork, 2026-10-28): the class's binary name with dots,
+    // its module's name ("java.base/java.lang.Integer.parseInt"), no file name when the class has no SourceFile
+    // attribute ("Unknown Source"; it showed the method's name), and -2 for a native method ("Native Method").
+    int line = is_frame_native(frame) ? -2 : get_line_number(method->code, frame->program_counter);
     object o = (void *)get_class_mirror(thread, method->my_class);
     if (!o)
       goto oom;
     E->declaringClassObject = o;
-    o = MakeJStringFromModifiedUTF8(thread, method->my_class->name, true);
+    obj_header *module = ((struct native_Class *)o)->module;
+    if (module)
+      E->moduleName = LoadFieldObject(module, "java/lang/String", "name"); // null for the unnamed module
+    INIT_STACK_STRING(binary_name, 1024);
+    exchange_slashes_and_dots(&binary_name, method->my_class->name);
+    o = MakeJStringFromModifiedUTF8(thread, binary_name, true);
     if (!o)
       goto oom;
     E->declaringClass = o;
@@ -74,6 +85,7 @@ DECLARE_NATIVE("java/lang", Throwable, fillInStackTrace, "(I)Ljava/lang/Throwabl
       goto oom;
     E->methodName = o;
     attribute_source_file *sf = method->my_class->source_file;
+    o = nullptr;
     if (sf) {
       o = MakeJStringFromModifiedUTF8(thread, sf->name, true);
       if (!o)

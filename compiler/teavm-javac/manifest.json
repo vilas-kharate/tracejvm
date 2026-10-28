@@ -8,7 +8,7 @@
     "license": "Apache-2.0"
   },
   "overlay": {
-    "version": 3,
+    "version": 4,
     "patches": [
       {
         "path": "patches/0001-configurable-jdk-build.patch",
@@ -21,13 +21,17 @@
       {
         "path": "patches/0003-platform-archive.patch",
         "sha256": "a571727e2a115f2d7ffb6af93592cd5c63aac68012be3712135a5b4bd9a448db"
+      },
+      {
+        "path": "patches/0004-shiklo-float-constants.patch",
+        "sha256": "702bea350519ed6ca646781f0a015233c60e03959a1f65f728273228b6fbf417"
       }
     ],
     "patchedFiles": {
       "compiler/build.gradle": "4da3057f9f940856d256cc5e68d4083831c24ad14487a90080620d1563f54f1e",
       "compiler/src/main/java/org/teavm/javac/Compiler.java": "3abc53fd39d6c7929a59e7cf39a02003861043c82550b35cf6df5c75fb31ed91",
       "compiler/src/main/java/org/teavm/javac/FileData.java": "d4ba43172f26b707a64858e60a642652fd45aea18847205c85128b26598507c0",
-      "javac/build.gradle": "f70ae51fcf1551bf96d21a925aa6391e2c2b8ac05f69429e3e7e428fb3bdea48",
+      "javac/build.gradle": "e7ac156e6ad43029af89b5b38c58ba2424f5df811207de2fb13dfe2d177a9855",
       "settings.gradle": "8e7a9e72c518b3abb09ceb454d8908e767d4e9728c9240629c3378122440d90a"
     }
   },

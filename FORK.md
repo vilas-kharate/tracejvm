@@ -34,6 +34,33 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: probes P7b (is the `-0.0` constant in the class file javac wrote?), P7c / P7d (javac's floating point:
+  decimal and hexadecimal literals, folded string constants, folded `-0.0`), P12k (the hanging pool with a watchdog
+  that prints a thread dump after 3 s), P12l (the main thread parks, another thread unparks it) and P14 (stack-trace
+  format).
+- 2026-10-28: javac's constant folding uses the JDK's floating point (bug 7; `compiler/teavm-javac/patches/0004`,
+  overlay version 4). javac runs on TeaVM 0.13.1, which compiles `-x` as `0.0 - x`
+  (`BaseWasmGenerationVisitor`, NEGATE), so a folded `-0.0` / `-0.0f` became `+0.0`; and javac formatted folded string
+  constants with TeaVM's `Double.toString` (`"" + Double.MIN_VALUE` gave `4.940656458412465E-324`). The patch makes
+  `javac/build.gradle` edit the unpacked OpenJDK sources: `ConstFold` negates by flipping the sign bit, and
+  `Type.stringValue()` formats doubles and floats with the JDK's `jdk.internal.math` conversion, copied into javac as
+  `com.sun.tools.javac.util.fp` (with `multiplyHigh` and a Latin-1 string helper, which TeaVM's class library lacks).
+  Checked on a desktop JDK: the copied conversion gives the same text as `Double.toString` / `Float.toString` for
+  800,039 values (edge cases, random bit patterns, subnormals).
+- 2026-10-28: the scheduler sets a thread's `eetop` again when it queues a call on it (`vm/roundrobin_scheduler.c`).
+  `free_thread_info` cleared it when the host's previous call on the main thread ended, and the host makes two calls
+  per program on a reused VM, so from the second program on `unpark(main)` was dropped: an untimed `Future.get` or
+  `Condition.await` on the main thread never woke (bug 12; timed waits returned at their timeout) and
+  `Thread.currentThread().isAlive()` was false.
+- 2026-10-28: method-handle constants of kind getStatic, putField and putStatic (JVMS 5.4.3.5) — only getField was
+  supported, and the others aborted the VM ("Unsupported method handle kind"), e.g. in a `switch` on a record pattern
+  with a `when` guard; field handles resolve the field's class, put kinds make setters (`vm/bjvm.c`).
+- 2026-10-28: `raise_vm_exception` initialises an exception class the VM did not initialise at boot (it aborted the
+  VM, e.g. for `ConnectException`) (`vm/exceptions.c`); `UnixNativeDispatcher.statvfs0` added (`Files.copy`,
+  `FileStore` sizes; the in-memory file system is described as 1 GiB).
+- 2026-10-28: stack traces as HotSpot prints them: binary class names with dots, the module
+  (`java.base/java.lang.Integer.parseInt`), "Unknown Source" when a class has no SourceFile (it showed the method's
+  name), "Native Method", and frames of hidden classes left out (`natives/share/java/lang/Throwable.c`).
 - 2026-10-28: `Class.forName` of an array name with a class loader (`"[I"`, `"[Ljava.lang.String;"`) loads the
   element class and builds the array class, as HotSpot does; it asked `loader.loadClass("[I")`, which always fails,
   so deserializing any array field broke the stream (`natives/share/java/lang/Class.c`).

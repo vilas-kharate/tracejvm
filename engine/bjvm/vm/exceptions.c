@@ -31,7 +31,16 @@ int raise_vm_exception(vm_thread *thread, const slice exception_name, slice msg_
   classdesc *classdesc = bootstrap_lookup_class(thread, exception_name);
   DCHECK(!thread->current_exception);
   if (unlikely(classdesc->state != CD_STATE_INITIALIZED)) {
-    vm_exception_was_not_initialized(exception_name);
+    // Not one of the classes initialised at boot (e.g. java.net.ConnectException): initialise it now, synchronously,
+    // as Class.forName0 does; it aborted the VM (Shiklo fork, 2026-10-28).
+    initialize_class_t ctx = {.args = {thread, classdesc}};
+    thread->stack.synchronous_depth++;
+    future_t f = initialize_class(&ctx);
+    thread->stack.synchronous_depth--;
+    if (f.status != FUTURE_READY || ctx._result || thread->current_exception ||
+        classdesc->state != CD_STATE_INITIALIZED) {
+      vm_exception_was_not_initialized(exception_name);
+    }
   }
 
   // Create the exception object

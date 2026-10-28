@@ -131,6 +131,100 @@ true
 4.9E-324
 </script>
 
+<!-- P7b: does javac (TeaVM) write the -0.0 constant? CONSTANT_Double is tag 6 + 8 bytes; -0.0 is 80 00 .. 00. -->
+<script type="text/x-java" data-id="P7b" data-name="bug 7: is the -0.0 constant in the class file javac wrote?">
+public class Main {
+    public static void main(String[] a) throws Exception {
+        double v = -0.0;
+        try (var in = Main.class.getResourceAsStream("Main.class")) {
+            if (in == null) { System.out.println("no class file to read"); return; }
+            byte[] b = in.readAllBytes();
+            boolean found = false;
+            for (int i = 0; i + 8 < b.length && !found; i++) {
+                if (b[i] != 6 || b[i + 1] != (byte) 0x80) continue;
+                boolean zeros = true;
+                for (int k = 2; k <= 8; k++) zeros &= b[i + k] == 0;
+                found = zeros;
+            }
+            System.out.println("-0.0 in the constant pool: " + found);
+        }
+        System.out.println(1.0 / v);
+    }
+}
+</script>
+<script type="text/plain" data-out="P7b">
+-0.0 in the constant pool: true
+-Infinity
+</script>
+
+<!-- P7c: everything javac (TeaVM) does with floating point. Lines 1-19: literals as javac parsed them into the class
+     file (printed at run time by the VM's JDK). Line 21: string constants javac folded with Type.stringValue() (patch
+     0004 of compiler/teavm-javac). Line 22: folded -0.0 / -0.0f (ConstFold's negation, patch 0004). -->
+<script type="text/x-java" data-id="P7c" data-name="bug 7: javac's floating point (literals, folded strings, folded -0.0)">
+public class Main {
+    static final double MIN = Double.MIN_VALUE;
+    public static void main(String[] a) {
+        double[] d = { 4.9E-324, 2.4703282292062328E-324, 2.2250738585072012e-308, 2.2250738585072011e-308, 1e23, 8.41e21,
+            1.7976931348623157E308, 0.1, 9007199254740993.0, 1.00000000000000011102230246251565404236316680908203125,
+            123456789012345678901234567890.0, 3.141592653589793 };
+        for (double x : d) System.out.println(x + " " + Long.toHexString(Double.doubleToRawLongBits(x)));
+        float[] f = { 1.4E-45f, 7.0064923E-45f, 1.17549435E-38f, 3.4028235E38f, 0.1f, 16777217f, 1.1754942E-38f };
+        for (float x : f) System.out.println(x + " " + Integer.toHexString(Float.floatToRawIntBits(x)));
+        System.out.println("" + MIN + " " + Float.MIN_VALUE + " " + 1e-5 + " " + 1.0E7 + " " + 100.0f + " " + -0.0 + " " + -0.0f + " " + (0.1 + 0.2) + " " + 2e-323);
+        final double neg = -0.0;
+        final float negf = -0.0f;
+        System.out.println(1 / neg + " " + 1 / negf + " " + Math.copySign(1.0, -0.0) + " " + Double.compare(0.0, -0.0));
+    }
+}
+</script>
+<script type="text/plain" data-out="P7c">
+4.9E-324 1
+4.9E-324 1
+2.2250738585072014E-308 10000000000000
+2.225073858507201E-308 fffffffffffff
+1.0E23 44b52d02c7e14af6
+8.41E21 447c7e83209e90b2
+1.7976931348623157E308 7fefffffffffffff
+0.1 3fb999999999999a
+9.007199254740992E15 4340000000000000
+1.0 3ff0000000000000
+1.2345678901234568E29 45f8ee90ff6c373e
+3.141592653589793 400921fb54442d18
+1.4E-45 1
+7.0E-45 5
+1.1754944E-38 800000
+3.4028235E38 7f7fffff
+0.1 3dcccccd
+1.6777216E7 4b800000
+1.1754942E-38 7fffff
+4.9E-324 1.4E-45 1.0E-5 1.0E7 100.0 -0.0 -0.0 0.30000000000000004 2.0E-323
+-Infinity -Infinity -1.0 1
+</script>
+
+<!-- P7d: hexadecimal floating-point literals, which javac also parses on TeaVM (kept apart from P7c: a literal javac
+     cannot parse stops the whole program from compiling). -->
+<script type="text/x-java" data-id="P7d" data-name="bug 7: hexadecimal floating-point literals">
+public class Main {
+    public static void main(String[] a) {
+        double[] d = { 0x1.0p0, 0x1.fffffffffffffp-1022, 0x1p-1074, 0x1.8p1, 0x.8p1, 0x1.fffffffffffffp1023 };
+        for (double x : d) System.out.println(x + " " + Long.toHexString(Double.doubleToRawLongBits(x)));
+        float[] f = { 0x1.8p1f, 0x1p-149f, 0x1.fffffep127f };
+        for (float x : f) System.out.println(x + " " + Integer.toHexString(Float.floatToRawIntBits(x)));
+    }
+}
+</script>
+<script type="text/plain" data-out="P7d">
+1.0 3ff0000000000000
+4.4501477170144023E-308 1fffffffffffff
+4.9E-324 1
+3.0 4008000000000000
+1.0 3ff0000000000000
+1.7976931348623157E308 7fefffffffffffff
+3.0 40400000
+1.4E-45 1
+3.4028235E38 7f7fffff
+</script>
+
 <script type="text/x-java" data-id="P12a" data-name="bug 12: fixed pool of 3, five tasks, Future.get">
 import java.util.*;
 import java.util.concurrent.*;
@@ -250,6 +344,45 @@ virtual 4950
 42
 </script>
 
+<!-- P12k: P12a (untimed get straight after submit; P12g-j wait with timeouts and pass) with a watchdog that, if the
+     program is still running after 3 s, prints the futures, the pool and where every thread is. -->
+<script type="text/x-java" data-id="P12k" data-name="bug 12: P12a with a watchdog that shows where each thread waits">
+import java.util.*;
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        List<Future<Integer>> fs = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) { int k = i; fs.add(pool.submit(() -> k * k)); }
+        Thread dog = new Thread(() -> {
+            try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
+            StringBuilder sb = new StringBuilder("WATCHDOG futures:");
+            for (Future<Integer> f : fs) sb.append(' ').append(f.state());
+            sb.append("\nWATCHDOG ").append(pool);
+            try {
+                for (Map.Entry<Thread, StackTraceElement[]> e : Thread.getAllStackTraces().entrySet()) {
+                    sb.append("\nWATCHDOG thread ").append(e.getKey().getName()).append(' ').append(e.getKey().getState());
+                    StackTraceElement[] st = e.getValue();
+                    for (int i = 0; i < Math.min(6, st.length); i++) sb.append("\n    at ").append(st[i]);
+                }
+            } catch (Throwable t) { sb.append("\nWATCHDOG no thread dump: ").append(t); }
+            System.out.println(sb);
+        });
+        dog.setDaemon(true);
+        dog.start();
+        int sum = 0;
+        for (Future<Integer> f : fs) sum += f.get();
+        System.out.println(sum);
+        pool.shutdown();
+        System.out.println(pool.awaitTermination(2, TimeUnit.SECONDS));
+    }
+}
+</script>
+<script type="text/plain" data-out="P12k">
+55
+true
+</script>
+
 <!-- P12g-j: where the fixed pool (P12a) stops. Each get has a 3 s timeout; on a timeout the line shows the task
      counters and the pool's own state, so the report says how far it got (a real JDK prints only the "got" lines). -->
 <script type="text/x-java" data-id="P12g" data-name="bug 12: fixed pool of 3, five tasks, progress">
@@ -351,6 +484,57 @@ got 4
 got 9
 got 16
 got 25
+</script>
+
+<!-- P12l: the cause of P12a without a pool. The host runs two calls on the main thread per program (runCompiled, then
+     takeLastIsolationReport) and the scheduler cleared the main thread's eetop when a call ended, so from the second
+     program of a VM on, unpark(main) was dropped: an untimed park never woke and isAlive() said false. It must not be
+     the first program of a VM (a crash or time-out before it starts a new one), so it comes after P12g-j, which pass. -->
+<script type="text/x-java" data-id="P12l" data-name="bug 12: main thread parks without a timeout, another thread unparks it">
+import java.util.concurrent.locks.LockSupport;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        Thread main = Thread.currentThread();
+        System.out.println(main.isAlive());
+        Thread t = new Thread(() -> {
+            try { Thread.sleep(100); } catch (InterruptedException e) { return; }
+            LockSupport.unpark(main);
+        });
+        t.start();
+        LockSupport.park();
+        System.out.println("woke");
+        t.join();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12l">
+true
+woke
+</script>
+
+<script type="text/x-java" data-id="P14" data-name="stack traces: JDK frames as HotSpot names them, hidden lambda frames left out">
+public class Main {
+    public static void main(String[] a) {
+        try { Integer.parseInt("x"); } catch (NumberFormatException e) {
+            StackTraceElement f = e.getStackTrace()[0];
+            System.out.println(f.getClassName() + " " + f.getModuleName() + " " + f.getMethodName());
+            System.out.println(f.toString().startsWith("java.base/java.lang.NumberFormatException.forInputString("));
+            for (StackTraceElement s : e.getStackTrace()) if (s.getClassName().equals("Main")) System.out.println(s);
+        }
+        Runnable r = () -> { throw new IllegalStateException("x"); };
+        try { r.run(); } catch (IllegalStateException e) {
+            System.out.println(e.getStackTrace()[0].getMethodName().startsWith("lambda$main$"));
+            System.out.println(e.getStackTrace()[1]);
+        }
+    }
+}
+</script>
+<script type="text/plain" data-out="P14">
+java.lang.NumberFormatException java.base forInputString
+true
+Main.main(Main.java:3)
+true
+Main.main(Main.java:10)
 </script>
 
 <script type="text/x-java" data-id="P13" data-name="bug 13: a server and a client on localhost, then an unreachable address">
