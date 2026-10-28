@@ -105,7 +105,8 @@ void raise_incompatible_class_change_error(vm_thread *thread, const slice compla
 
 void raise_array_index_oob_exception(vm_thread *thread, int index, int length) {
   INIT_STACK_STRING(complaint, 80);
-  bprintf(complaint, "Index %d out of bounds for array of length %d", index, length);
+  // HotSpot's wording (Shiklo fork, 2026-10-28; was "… for array of length …").
+  bprintf(complaint, "Index %d out of bounds for length %d", index, length);
   raise_vm_exception(thread, STR("java/lang/ArrayIndexOutOfBoundsException"), complaint);
 }
 

@@ -34,6 +34,10 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: `Runtime.totalMemory` / `freeMemory` added and `maxMemory` made real (the heap's capacity and use;
+  `maxMemory` was Long.MAX_VALUE), `VM.latestUserDefinedLoader0` added (deserialization),
+  `LinuxNativeDispatcher.init` / `directCopy0` added (`Files.copy`), and ArrayIndexOutOfBoundsException says
+  "Index 2 out of bounds for length 2" as HotSpot does.
 - 2026-10-28: records — the class-file parser reads the Record attribute (`vm/classfile.c`, `vm/classfile.h`), and
   `Class.isRecord0` / `getRecordComponents0` are implemented (`natives/share/java/lang/Class.c`); they were missing,
   so `isRecord()`, `getRecordComponents()` and record serialization threw UnsatisfiedLinkError.
