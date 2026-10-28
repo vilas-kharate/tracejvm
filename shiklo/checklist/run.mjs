@@ -1,7 +1,7 @@
 // Runs the Shiklo Java checklist (java-checklist.html: one program per row of the full-language checklist, each
 // compared with the exact output of a real JDK) against the runtime in ./vendor/runtime, in Playwright's Chromium.
 // Prints the page's report; exits 0 even when rows fail (the report is the result), 2 when the page did not finish.
-//   node shiklo/checklist/run.mjs [timeoutSeconds]
+//   node shiklo/checklist/run.mjs [timeoutSeconds] [page]   (page: java-checklist.html, or java-probes.html)
 import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
@@ -38,7 +38,8 @@ const server = createServer((req, res) => {
   createReadStream(file).pipe(res);
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const url = `http://127.0.0.1:${server.address().port}/java-checklist.html?coi=1&rt=runtime`;
+const page = process.argv[3] ?? "java-checklist.html";
+const url = `http://127.0.0.1:${server.address().port}/${page}?coi=1&rt=runtime`;
 
 const browser = await chromium.launch();
 let code = 0;

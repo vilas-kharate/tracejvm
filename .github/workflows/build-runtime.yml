@@ -82,7 +82,9 @@ jobs:
           ln -s "${{ steps.release.outputs.dir }}" shiklo/checklist/vendor/runtime
           node shiklo/checklist/run.mjs 900 > checklist-report.txt 2>&1 || true
           grep -E '^INFO .* rows pass' checklist-report.txt || tail -20 checklist-report.txt
-          gh release upload "build-${{ github.run_number }}" checklist-report.txt
+          node shiklo/checklist/run.mjs 600 java-probes.html > probes-report.txt 2>&1 || true
+          grep -E '^INFO .* rows pass' probes-report.txt || tail -20 probes-report.txt
+          gh release upload "build-${{ github.run_number }}" checklist-report.txt probes-report.txt
       - name: Publish the log of a failed build
         if: failure()
         env:

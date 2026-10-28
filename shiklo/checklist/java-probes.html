@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Java probes: narrowing down open TraceJVM bugs</title></head>
+<body><pre id="out"></pre>
+
+<!-- Probes: small programs that narrow down an open TraceJVM bug (one program per row, so a crash in one does not hide
+     the others). Expected output = a real JDK 23. -->
+
+<script type="text/x-java" data-id="P8a" data-name="bug 8: switch with a type pattern on a record">
+public class Main {
+    record Rect(double w, double h) {}
+    static String d(Object o) { return switch (o) { case Rect r -> "rect " + r.w(); default -> "other"; }; }
+    public static void main(String[] a) { System.out.println(d(new Rect(2, 3))); System.out.println(d("x")); }
+}
+</script>
+<script type="text/plain" data-out="P8a">
+rect 2.0
+other
+</script>
+
+<script type="text/x-java" data-id="P8b" data-name="bug 8: record pattern, int components, no guard">
+public class Main {
+    record P(int x, int y) {}
+    static String d(Object o) { return switch (o) { case P(int x, int y) -> "p " + x + "," + y; default -> "other"; }; }
+    public static void main(String[] a) { System.out.println(d(new P(1, 2))); System.out.println(d("x")); }
+}
+</script>
+<script type="text/plain" data-out="P8b">
+p 1,2
+other
+</script>
+
+<script type="text/x-java" data-id="P8c" data-name="bug 8: record pattern, double components, no guard">
+public class Main {
+    record Rect(double w, double h) {}
+    static String d(Object o) { return switch (o) { case Rect(double w, double h) -> "r " + w + "x" + h; default -> "other"; }; }
+    public static void main(String[] a) { System.out.println(d(new Rect(2, 3))); System.out.println(d("x")); }
+}
+</script>
+<script type="text/plain" data-out="P8c">
+r 2.0x3.0
+other
+</script>
+
+<script type="text/x-java" data-id="P8d" data-name="bug 8: record pattern, int components, with a guard">
+public class Main {
+    record P(int x, int y) {}
+    static String d(Object o) { return switch (o) { case P(int x, int y) when x == y -> "diag " + x; case P(int x, int y) -> "p " + x + "," + y; default -> "other"; }; }
+    public static void main(String[] a) { System.out.println(d(new P(2, 2))); System.out.println(d(new P(1, 2))); }
+}
+</script>
+<script type="text/plain" data-out="P8d">
+diag 2
+p 1,2
+</script>
+
+<script type="text/x-java" data-id="P8e" data-name="bug 8: record pattern, double components, with a guard (as A6)">
+public class Main {
+    record Rect(double w, double h) {}
+    static String d(Object o) { return switch (o) { case Rect(double w, double h) when w == h -> "square " + w; case Rect(var w, var h) -> "rect " + w + "x" + h; default -> "other"; }; }
+    public static void main(String[] a) { System.out.println(d(new Rect(2, 2))); System.out.println(d(new Rect(2, 3))); }
+}
+</script>
+<script type="text/plain" data-out="P8e">
+square 2.0
+rect 2.0x3.0
+</script>
+
+<script type="text/x-java" data-id="P8f" data-name="bug 8: record pattern with double components in instanceof">
+public class Main {
+    record Rect(double w, double h) {}
+    public static void main(String[] a) { Object o = new Rect(2, 3); if (o instanceof Rect(double w, double h)) System.out.println(w + h); }
+}
+</script>
+<script type="text/plain" data-out="P8f">
+5.0
+</script>
+
+<script type="text/x-java" data-id="P7" data-name="bug 7: negative zero and subnormal doubles">
+public class Main {
+    public static void main(String[] a) {
+        double z = 0.0;
+        double nz = -z;
+        System.out.println(Double.compare(0.0, nz));
+        System.out.println(Double.compare(0.0, -0.0));
+        System.out.println(Double.doubleToRawLongBits(nz));
+        System.out.println(Double.doubleToRawLongBits(-0.0));
+        System.out.println(1.0 / nz);
+        System.out.println(Long.toHexString(Double.doubleToRawLongBits(Double.MIN_VALUE)));
+        double m = Double.longBitsToDouble(1L);
+        System.out.println(m == Double.MIN_VALUE);
+        System.out.println(m);
+        System.out.println(Double.MIN_VALUE);
+        System.out.println(Double.toString(m));
+    }
+}
+</script>
+<script type="text/plain" data-out="P7">
+1
+1
+-9223372036854775808
+-9223372036854775808
+-Infinity
+1
+true
+4.9E-324
+4.9E-324
+4.9E-324
+</script>
+
+<script type="text/x-java" data-id="P12a" data-name="bug 12: fixed pool of 3, five tasks, Future.get">
+import java.util.*;
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        List<Future<Integer>> fs = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) { int k = i; fs.add(pool.submit(() -> k * k)); }
+        int sum = 0;
+        for (Future<Integer> f : fs) sum += f.get();
+        System.out.println(sum);
+        pool.shutdown();
+        System.out.println(pool.awaitTermination(2, TimeUnit.SECONDS));
+    }
+}
+</script>
+<script type="text/plain" data-out="P12a">
+55
+true
+</script>
+
+<script type="text/x-java" data-id="P12b" data-name="bug 12: one thread, one task, Future.get">
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        System.out.println(pool.submit(() -> 7).get());
+        pool.shutdown();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12b">
+7
+</script>
+
+<script type="text/x-java" data-id="P12c" data-name="bug 12: cached pool, invokeAll">
+import java.util.*;
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService p = Executors.newCachedThreadPool();
+        List<Callable<String>> jobs = List.of(() -> "a", () -> "b");
+        List<String> got = new ArrayList<>();
+        for (Future<String> f : p.invokeAll(jobs)) got.add(f.get());
+        System.out.println(got);
+        p.shutdown();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12c">
+[a, b]
+</script>
+
+<script type="text/x-java" data-id="P12d" data-name="bug 12: CompletableFuture (common pool)">
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        System.out.println(CompletableFuture.supplyAsync(() -> 6).thenApplyAsync(x -> x * 7).get());
+        System.out.println(CompletableFuture.supplyAsync(() -> { if (true) throw new IllegalStateException("boom"); return "x"; }).exceptionally(e -> e.getCause().getMessage()).join());
+    }
+}
+</script>
+<script type="text/plain" data-out="P12d">
+42
+boom
+</script>
+
+<script type="text/x-java" data-id="P12e" data-name="bug 12: latch, barrier, semaphore, blocking queue">
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        CountDownLatch latch = new CountDownLatch(3);
+        for (int i = 0; i < 3; i++) new Thread(latch::countDown).start();
+        latch.await();
+        System.out.println("latch " + latch.getCount());
+        CyclicBarrier barrier = new CyclicBarrier(2, () -> System.out.println("barrier tripped"));
+        Thread bt = new Thread(() -> { try { barrier.await(); } catch (Exception e) {} });
+        bt.start(); barrier.await(); bt.join();
+        Semaphore sem = new Semaphore(2); sem.acquire();
+        System.out.println("permits " + sem.availablePermits());
+        BlockingQueue<Integer> q = new LinkedBlockingQueue<>();
+        Thread prod = new Thread(() -> { for (int i = 1; i <= 3; i++) q.add(i); q.add(-1); });
+        prod.start();
+        int got = 0, v;
+        while ((v = q.take()) != -1) got += v;
+        System.out.println("queue " + got);
+    }
+}
+</script>
+<script type="text/plain" data-out="P12e">
+latch 0
+barrier tripped
+permits 1
+queue 6
+</script>
+
+<script type="text/x-java" data-id="P12f" data-name="bug 12: interrupting a sleeping thread, virtual threads, ForkJoin">
+import java.util.*;
+import java.util.concurrent.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        Thread sleeper = new Thread(() -> { try { Thread.sleep(10000); System.out.println("not here"); } catch (InterruptedException e) { System.out.println("interrupted"); } });
+        sleeper.start(); sleeper.interrupt(); sleeper.join();
+        try (ExecutorService vt = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<Integer>> vf = new ArrayList<>();
+            for (int i = 0; i < 100; i++) { int k = i; vf.add(vt.submit(() -> k)); }
+            int s = 0; for (var f : vf) s += f.get();
+            System.out.println("virtual " + s);
+        }
+        System.out.println(ForkJoinPool.commonPool().invoke(new RecursiveTask<Long>() { protected Long compute() { return 21L * 2; } }));
+    }
+}
+</script>
+<script type="text/plain" data-out="P12f">
+interrupted
+virtual 4950
+42
+</script>
+
+<script type="text/x-java" data-id="P13" data-name="bug 13: a server and a client on localhost, then an unreachable address">
+import java.io.*;
+import java.net.*;
+public class Main {
+    public static void main(String[] args) throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            int port = server.getLocalPort();
+            Thread client = new Thread(() -> { try (Socket s = new Socket("localhost", port); PrintWriter out = new PrintWriter(s.getOutputStream(), true); BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()))) { out.println("ping"); System.out.println("client got " + in.readLine()); } catch (IOException e) { System.out.println("client " + e); } });
+            client.start();
+            try (Socket c = server.accept(); BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream())); PrintWriter out = new PrintWriter(c.getOutputStream(), true)) { System.out.println("server got " + in.readLine()); out.println("pong"); }
+            client.join();
+        }
+        try { new Socket("localhost", 1); } catch (ConnectException e) { System.out.println("refused"); }
+    }
+}
+</script>
+<script type="text/plain" data-out="P13">
+server got ping
+client got pong
+refused
+</script>
+
+<script type="module">
+  import { createJava } from "./java-engine.js";
+  const out = document.getElementById("out");
+  const say = (s) => { out.textContent += s + "\n"; };
+  const only = new URLSearchParams(location.search).get("only");
+  const want = only ? new Set(only.split(",")) : null;
+  // ?rt=<folder under vendor/> runs the checks on another runtime build (e.g. tracejvm-fork-3/runtime); default 0.4.1.
+  const rt = new URLSearchParams(location.search).get("rt") || "tracejvm-0.4.1/runtime";
+  const BASE = new URL(`./vendor/${rt}/`, location.href).href;
+  const enc = new TextEncoder();
+  const text = (el) => (el ? el.textContent.replace(/^\n/, "") : "");
+  const results = [];
+  try {
+    const java = createJava({ base: BASE });
+    const t0 = performance.now();
+    await java.ready;
+    say(`INFO engine ready ${Math.round(performance.now() - t0)} ms`);
+    for (const el of document.querySelectorAll('script[type="text/x-java"]')) {
+      const id = el.dataset.id;
+      if (want && !want.has(id)) continue;
+      const expect = text(document.querySelector(`script[data-out="${id}"]`));
+      const c = await java.compile({ "Main.java": text(el) });
+      if (!c.ok) {
+        say(`FAIL ${id} ${el.dataset.name}${el.dataset.bug ? ` (TraceJVM bug ${el.dataset.bug})` : ""}\n   does not compile: ${c.stderr.split("\n").slice(0, 4).join(" | ")}`);
+        results.push([id, false]); continue;
+      }
+      const lines = el.dataset.input != null ? el.dataset.input.split("|") : [];
+      const files = Object.fromEntries(Object.entries(el.dataset.files ? JSON.parse(el.dataset.files) : {}).map(([k, v]) => [k, enc.encode(v)]));
+      let stdout = "", stderr = "";
+      const r = await java.run(c.program, { files, onOut: (t) => { stdout += t; }, onErr: (t) => { stderr += t; },
+        readLine: () => new Promise((res) => setTimeout(() => res(lines.length ? lines.shift() : null), 5)), timeLimitMs: 20000 });
+      const code = +(el.dataset.code || 0), errStart = el.dataset.err || "";
+      const ok = stdout === expect && r.code === code && stderr.startsWith(errStart) && (errStart || !stderr);
+      results.push([id, ok]);
+      say(`${ok ? "PASS" : "FAIL"} ${id} ${el.dataset.name}${!ok && el.dataset.bug ? ` (TraceJVM bug ${el.dataset.bug})` : ""}  [compile ${c.ms} ms, run ${r.ms} ms]`);
+      if (!ok) {
+        const g = stdout.split("\n"), e = expect.split("\n");
+        for (let i = 0; i < Math.max(g.length, e.length); i++) if (g[i] !== e[i]) say(`   line ${i + 1}\n     JDK  ${JSON.stringify(e[i])}\n     here ${JSON.stringify(g[i])}`);
+        if (r.code !== code) say(`   exit code ${r.code} (JDK: ${code}) ${r.error || ""}`);
+        if (!stderr.startsWith(errStart) || (!errStart && stderr)) say(`   stderr ${JSON.stringify(stderr.slice(0, 700))}`);
+      }
+    }
+  } catch (e) {
+    say(`FAIL ${e && `${e.name}: ${e.message}${e.cause ? ` (cause: ${e.cause.message || e.cause})` : ""}\n${e.stack || ""}` || e}`);
+  }
+  const passed = results.filter(([, ok]) => ok).length;
+  say(`INFO ${passed} of ${results.length} rows pass; failing: ${results.filter(([, ok]) => !ok).map(([id]) => id).join(", ") || "none"}`);
+  say("DONE");
+</script></body></html>
