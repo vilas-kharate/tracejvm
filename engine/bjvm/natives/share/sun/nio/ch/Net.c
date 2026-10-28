@@ -20,11 +20,33 @@ static int file_descriptor_value(handle *descriptor) {
       : -1;
 }
 
+// As the JDK's Net.c (handleSocketError): the exception class follows the error, and the message is the system's text
+// alone ("Connection refused"), so `catch (ConnectException e)` works (Shiklo fork, 2026-10-28; it was always a
+// SocketException "connect: Connection refused").
 static void raise_socket_exception(
-    vm_thread *thread, char const *operation, int error) {
+    vm_thread *thread, [[maybe_unused]] char const *operation, int error) {
   INIT_STACK_STRING(message, 192);
-  bprintf(message, "%s: %s", operation, strerror(error));
-  raise_vm_exception(thread, STR("java/net/SocketException"), message);
+  bprintf(message, "%s", strerror(error));
+  switch (error) {
+  case EPROTO:
+    raise_vm_exception(thread, STR("java/net/ProtocolException"), message);
+    break;
+  case ECONNREFUSED:
+  case ETIMEDOUT:
+  case ENOTCONN:
+    raise_vm_exception(thread, STR("java/net/ConnectException"), message);
+    break;
+  case EHOSTUNREACH:
+    raise_vm_exception(thread, STR("java/net/NoRouteToHostException"), message);
+    break;
+  case EADDRINUSE:
+  case EADDRNOTAVAIL:
+  case EACCES:
+    raise_vm_exception(thread, STR("java/net/BindException"), message);
+    break;
+  default:
+    raise_vm_exception(thread, STR("java/net/SocketException"), message);
+  }
 }
 
 static bool inet4_host(obj_header *address, char *host, size_t capacity) {

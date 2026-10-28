@@ -46,6 +46,12 @@ let code = 0;
 try {
   const page = await browser.newPage();
   page.on("pageerror", (error) => console.error(`page error: ${error.message}`));
+  // The VM's own messages when it aborts (assertions, wasm traps) go to its worker's console: printed after the report.
+  const consoleErrors = new Set();
+  const onConsole = (msg) => { if (msg.type() === "error" && consoleErrors.size < 200) consoleErrors.add(msg.text().slice(0, 2000)); };
+  page.on("console", onConsole);
+  page.on("worker", (worker) => { try { worker.on("console", onConsole); } catch { /* older Playwright: page events only */ } });
+  process.on("exit", () => { if (consoleErrors.size) process.stdout.write(`== console errors\n${[...consoleErrors].join("\n")}\n`); });
   await page.goto(url);
   try {
     await page.waitForFunction(() => /\nDONE\n?$|^DONE\n?$/.test(document.getElementById("out")?.textContent ?? ""), null,

@@ -75,6 +75,30 @@ public class Main {
 5.0
 </script>
 
+<script type="text/x-java" data-id="P8g" data-name="bug 8: guard on a type pattern (no record pattern)">
+public class Main {
+    static String d(Object o) { return switch (o) { case Integer i when i > 5 -> "big " + i; case Integer i -> "small " + i; default -> "other"; }; }
+    public static void main(String[] a) { System.out.println(d(7)); System.out.println(d(2)); System.out.println(d("x")); }
+}
+</script>
+<script type="text/plain" data-out="P8g">
+big 7
+small 2
+other
+</script>
+
+<script type="text/x-java" data-id="P8h" data-name="bug 8: record pattern and a condition with instanceof (no switch)">
+public class Main {
+    record P(int x, int y) {}
+    static String d(Object o) { if (o instanceof P(int x, int y) && x == y) return "diag " + x; if (o instanceof P(int x, int y)) return "p " + x + "," + y; return "other"; }
+    public static void main(String[] a) { System.out.println(d(new P(2, 2))); System.out.println(d(new P(1, 2))); }
+}
+</script>
+<script type="text/plain" data-out="P8h">
+diag 2
+p 1,2
+</script>
+
 <script type="text/x-java" data-id="P7" data-name="bug 7: negative zero and subnormal doubles">
 public class Main {
     public static void main(String[] a) {
@@ -224,6 +248,109 @@ public class Main {
 interrupted
 virtual 4950
 42
+</script>
+
+<!-- P12g-j: where the fixed pool (P12a) stops. Each get has a 3 s timeout; on a timeout the line shows the task
+     counters and the pool's own state, so the report says how far it got (a real JDK prints only the "got" lines). -->
+<script type="text/x-java" data-id="P12g" data-name="bug 12: fixed pool of 3, five tasks, progress">
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        AtomicInteger started = new AtomicInteger(), done = new AtomicInteger();
+        List<Future<Integer>> fs = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) { int k = i; fs.add(pool.submit(() -> { started.incrementAndGet(); int r = k * k; done.incrementAndGet(); return r; })); }
+        System.out.println("submitted");
+        for (int i = 0; i < 5; i++) {
+            try { System.out.println("got " + fs.get(i).get(3, TimeUnit.SECONDS)); }
+            catch (TimeoutException e) { System.out.println("timeout at " + (i + 1) + ": started " + started + ", done " + done + ", " + pool); }
+        }
+        pool.shutdownNow();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12g">
+submitted
+got 1
+got 4
+got 9
+got 16
+got 25
+</script>
+
+<script type="text/x-java" data-id="P12h" data-name="bug 12: fixed pool of 1, two tasks (the second waits in the queue)">
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(1);
+        AtomicInteger started = new AtomicInteger(), done = new AtomicInteger();
+        List<Future<Integer>> fs = new ArrayList<>();
+        for (int i = 1; i <= 2; i++) { int k = i; fs.add(pool.submit(() -> { started.incrementAndGet(); int r = k * k; done.incrementAndGet(); return r; })); }
+        for (int i = 0; i < 2; i++) {
+            try { System.out.println("got " + fs.get(i).get(3, TimeUnit.SECONDS)); }
+            catch (TimeoutException e) { System.out.println("timeout at " + (i + 1) + ": started " + started + ", done " + done + ", " + pool); }
+        }
+        pool.shutdownNow();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12h">
+got 1
+got 4
+</script>
+
+<script type="text/x-java" data-id="P12i" data-name="bug 12: fixed pool of 3, three tasks (nothing queued)">
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        AtomicInteger started = new AtomicInteger(), done = new AtomicInteger();
+        List<Future<Integer>> fs = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) { int k = i; fs.add(pool.submit(() -> { started.incrementAndGet(); int r = k * k; done.incrementAndGet(); return r; })); }
+        for (int i = 0; i < 3; i++) {
+            try { System.out.println("got " + fs.get(i).get(3, TimeUnit.SECONDS)); }
+            catch (TimeoutException e) { System.out.println("timeout at " + (i + 1) + ": started " + started + ", done " + done + ", " + pool); }
+        }
+        pool.shutdownNow();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12i">
+got 1
+got 4
+got 9
+</script>
+
+<script type="text/x-java" data-id="P12j" data-name="bug 12: three threads, five tasks, ArrayBlockingQueue instead of LinkedBlockingQueue">
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ExecutorService pool = new ThreadPoolExecutor(3, 3, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(5));
+        AtomicInteger started = new AtomicInteger(), done = new AtomicInteger();
+        List<Future<Integer>> fs = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) { int k = i; fs.add(pool.submit(() -> { started.incrementAndGet(); int r = k * k; done.incrementAndGet(); return r; })); }
+        for (int i = 0; i < 5; i++) {
+            try { System.out.println("got " + fs.get(i).get(3, TimeUnit.SECONDS)); }
+            catch (TimeoutException e) { System.out.println("timeout at " + (i + 1) + ": started " + started + ", done " + done + ", " + pool); }
+        }
+        pool.shutdownNow();
+    }
+}
+</script>
+<script type="text/plain" data-out="P12j">
+got 1
+got 4
+got 9
+got 16
+got 25
 </script>
 
 <script type="text/x-java" data-id="P13" data-name="bug 13: a server and a client on localhost, then an unreachable address">

@@ -34,6 +34,14 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: `Class.forName` of an array name with a class loader (`"[I"`, `"[Ljava.lang.String;"`) loads the
+  element class and builds the array class, as HotSpot does; it asked `loader.loadClass("[I")`, which always fails,
+  so deserializing any array field broke the stream (`natives/share/java/lang/Class.c`).
+- 2026-10-28: socket errors throw the JDK's classes with the system's text alone: `ConnectException: Connection
+  refused`, `NoRouteToHostException`, `BindException`, `ProtocolException`, else `SocketException`
+  (`natives/share/sun/nio/ch/Net.c`); `LinuxNativeDispatcher.posix_fadvise` added (a hint; `Files.copy`).
+- 2026-10-28: the checklist runner prints the page's and workers' console errors after the report, and a crashed
+  run's line carries the worker's message.
 - 2026-10-28: `Unsafe.park` consumes the unpark permit as `LockSupport.park` does (and returns at once for an
   interrupted thread); the permit was never consumed, so after a thread's first unpark its waits spun
   (`natives/share/jdk/internal/misc/Unsafe.c`).

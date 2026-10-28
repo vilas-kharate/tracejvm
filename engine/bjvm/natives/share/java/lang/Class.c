@@ -1,8 +1,10 @@
 #include "cached_classdescs.h"
 #include "objects.h"
 
+#include <arrays.h>
 #include <exceptions.h>
 #include <linkage.h>
+#include <string.h>
 #include <natives-dsl.h>
 #include <reflection.h>
 
@@ -221,22 +223,53 @@ DECLARE_NATIVE("java/lang", Class, forName0,
       return value_null();
     }
   } else {
-    // Invoke findClass on the classloader
-    cp_method *find_class = method_lookup(classloader->descriptor, STR("loadClass"),
-                                          STR("(Ljava/lang/String;)Ljava/lang/Class;"), true, false);
-    CHECK(find_class);
-    stack_value loadClass_args[2] = {{.obj = classloader}, {.obj = name_obj}};
-    stack_value result = call_interpreter_synchronous(thread, find_class, loadClass_args);
-    if (thread->current_exception) {
-      // loadClass threw an exception, propagate it
+    // Array names ("[I", "[[Ljava.lang.String;"): loadClass never accepts them, so as HotSpot does, the element class
+    // is loaded (a primitive one by the bootstrap loader, a class through this loader) and the array class built
+    // from it. ObjectInputStream.resolveClass reads every array field this way.
+    slice name = hslc(name_str);
+    int dims = 0;
+    while (dims < (int)name.len && name.chars[dims] == '[')
+      dims++;
+    bool primitive_elem = dims && dims < (int)name.len && name.chars[dims] != 'L';
+    bool malformed = dims >= (int)name.len ||
+                     (primitive_elem ? name.len != (size_t)dims + 1 || !strchr("ZBCSIJFD", name.chars[dims])
+                                     : name.len < (size_t)dims + 3 || name.chars[name.len - 1] != ';');
+    if (dims && malformed) {
+      raise_vm_exception(thread, STR("java/lang/ClassNotFoundException"), name);
       return value_null();
     }
-    if (result.obj == nullptr) {
-      // Raise ClassNotFoundException. Name uses slashes for some reason
-      raise_vm_exception(thread, STR("java/lang/ClassNotFoundException"), hslc(name_str));
-      return value_null();
+    if (primitive_elem) {
+      c = bootstrap_lookup_class(thread, name);
+      if (thread->current_exception)
+        return value_null();
+    } else {
+      if (dims) { // the element's name, with dots, for loadClass
+        INIT_STACK_STRING(elem_dots, 1024);
+        exchange_slashes_and_dots(&elem_dots, subslice_to(name, dims + 1, name.len - 1));
+        name_obj = MakeJStringFromModifiedUTF8(thread, elem_dots, false);
+        if (!name_obj)
+          return value_null(); // oom
+        classloader = args[2].handle->obj; // the allocation may have moved it
+      }
+      // Invoke findClass on the classloader
+      cp_method *find_class = method_lookup(classloader->descriptor, STR("loadClass"),
+                                            STR("(Ljava/lang/String;)Ljava/lang/Class;"), true, false);
+      CHECK(find_class);
+      stack_value loadClass_args[2] = {{.obj = classloader}, {.obj = name_obj}};
+      stack_value result = call_interpreter_synchronous(thread, find_class, loadClass_args);
+      if (thread->current_exception) {
+        // loadClass threw an exception, propagate it
+        return value_null();
+      }
+      if (result.obj == nullptr) {
+        // Raise ClassNotFoundException. Name uses slashes for some reason
+        raise_vm_exception(thread, STR("java/lang/ClassNotFoundException"), hslc(name_str));
+        return value_null();
+      }
+      c = unmirror_class(result.obj);
     }
-    c = unmirror_class(result.obj);
+    for (int i = 0; i < dims && !primitive_elem; ++i)
+      c = get_or_create_array_classdesc(thread, c);
   }
 
   int error = link_class(thread, c);

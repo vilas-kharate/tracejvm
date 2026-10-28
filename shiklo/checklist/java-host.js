@@ -213,7 +213,7 @@ export function createHost({ cwd = "/home/student", files = {}, onOut = () => {}
       }
       case "realpath": { const path = norm(p.path); if (!nodes.has(path)) throw err("ENOENT"); return { path }; }
       case "access": { statOf(norm(p.path)); return {}; }
-      case "environment": return { entries: [] };
+      case "environment": return { env: { HOME: cwd, USER: "student", PWD: cwd } };   // System.getenv
       default: throw err("ENOSYS", `posix.${req.operation} is not available in the browser`);
     }
   }

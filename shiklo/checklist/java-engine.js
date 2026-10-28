@@ -148,7 +148,7 @@ performance.now = () => origin + now();
         const res = await runner.run({ program, mainClass: "$.Run$", args: [main, ...args], signal: ac.signal });
         if (code == null) code = res.exitCode;
       } catch (e) {
-        if (code == null && !error) error = `The Java runtime stopped (${e && (e._tag || e.message)}).`;
+        if (code == null && !error) error = `The Java runtime stopped (${e && (e._tag || e.message)}${e && e.workerMessage ? `: ${e.workerMessage}` : ""}).`;
         runner = null;                        // a stopped VM is not reused: the next run starts a new one
       } finally { clearTimeout(timer); }
       return { code, error, files: host.files(), ms: Math.round(performance.now() - t) };
