@@ -230,11 +230,20 @@ DECLARE_ASYNC_NATIVE("jdk/internal/misc", Unsafe, park, "(ZJ)V", locals(rr_wakeu
   rr_scheduler *scheduler = thread->vm->scheduler;
   assert(scheduler && "Cannot park thread without a scheduler!");
 
+  // As LockSupport.park: an available permit is consumed and park returns at once; an interrupted thread does not
+  // park. The permit was never consumed before, so after a thread's first unpark every later park returned at once and
+  // its waits spun (Shiklo fork, 2026-10-28).
+  if (thread->unpark_permit || thread->thread_obj->interrupted) {
+    thread->unpark_permit = false;
+    ASYNC_RETURN_VOID();
+  }
+
   self->wakeup_info.kind = RR_THREAD_PARK;
   self->wakeup_info.wakeup_us = deadline_us;
   ASYNC_YIELD((void *)&self->wakeup_info);
 
   DEBUG_PEDANTIC_YIELD(self->wakeup_info);
+  thread->unpark_permit = false; // woken by unpark (or the deadline, or an interrupt): the permit is used up
 
   ASYNC_END(value_null());
 }

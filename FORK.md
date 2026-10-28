@@ -34,6 +34,9 @@ THIRD_PARTY_NOTICES.md).
   (`scripts/java/PlatformDescriptor.java`, used by `build-runtime.sh`): it exports what the profile's real modules
   export. Before, javac used the TeaVM class library's descriptor, so `java.util.concurrent.locks`, `java.sql`,
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
+- 2026-10-28: `Unsafe.park` consumes the unpark permit as `LockSupport.park` does (and returns at once for an
+  interrupted thread); the permit was never consumed, so after a thread's first unpark its waits spun
+  (`natives/share/jdk/internal/misc/Unsafe.c`).
 - 2026-10-28: `Runtime.totalMemory` / `freeMemory` added and `maxMemory` made real (the heap's capacity and use;
   `maxMemory` was Long.MAX_VALUE), `VM.latestUserDefinedLoader0` added (deserialization),
   `LinuxNativeDispatcher.init` / `directCopy0` added (`Files.copy`), and ArrayIndexOutOfBoundsException says
