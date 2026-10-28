@@ -713,6 +713,11 @@ void free_zstreams(vm *vm) {
     free(vm->z_streams[i]);
   }
   arrfree(vm->z_streams);
+  for (int i = 0; i < arrlen(vm->z_deflate_streams); ++i) {
+    deflateEnd(vm->z_deflate_streams[i]);
+    free(vm->z_deflate_streams[i]);
+  }
+  arrfree(vm->z_deflate_streams);
 }
 
 void free_vm(vm *vm) {

@@ -20,10 +20,12 @@ than the VM can execute. The explicit
 `compileClasslibEmuJava` release is a correctness guard: without it, a newer
 host JDK can put classfile version 69 SDK definitions beside the version 67
 compiler, causing valid sources such as records to fail during attribution.
-Patch 0004 (Shiklo fork) makes javac's constant folding use the JDK's floating
-point instead of TeaVM's: TeaVM compiles `-x` as `0.0 - x`, which lost the sign
-of a folded `-0.0`, and its `Double.toString` / `Float.toString` differ from the
-JDK's in string constants such as `"" + Double.MIN_VALUE`.
+Patch 0004 (Shiklo fork) makes javac use the JDK's floating point instead of
+TeaVM's: TeaVM compiles `-x` as `0.0 - x`, which lost the sign of a folded
+`-0.0`; its `Double.toString` / `Float.toString` differ from the JDK's in string
+constants such as `"" + Double.MIN_VALUE`; and its `Double.valueOf` /
+`Float.valueOf` rejected subnormal literals (`4.9E-324`) and read hexadecimal
+ones (`0x1.8p1`) as NaN.
 
 Build and verify:
 

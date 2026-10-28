@@ -69,7 +69,22 @@ static slice identify(slice *scratch, const cp_method *method) {
   return *scratch;
 }
 
-static void merge_itable(itable *dst, const itable *src, string_hash_table poisoned, classdesc *classdesc) {
+// Whether interface sub is super or extends it (its i-tables list every superinterface).
+static bool extends_interface(const classdesc *sub, const classdesc *super) {
+  if (sub == super)
+    return true;
+  for (int i = 0; i < arrlen(sub->itables.interfaces); ++i)
+    if (sub->itables.interfaces[i] == super)
+      return true;
+  return false;
+}
+
+// What the superinterfaces give for one name:descriptor (JVMS 5.4.3.3, 5.4.6): the one non-abstract method among the
+// maximally-specific ones, or ambiguous when there are several (or a superinterface already found it ambiguous). No
+// entry when every candidate is abstract.
+#define SELECTED_AMBIGUOUS ((void *)1)
+
+static void merge_itable(itable *dst, const itable *src, string_hash_table selected, classdesc *classdesc) {
   INIT_STACK_STRING(scratch, 1024);
   DCHECK(dst->interface == src->interface);
   DCHECK(arrlen(dst->methods) == arrlen(src->methods));
@@ -87,11 +102,16 @@ static void merge_itable(itable *dst, const itable *src, string_hash_table poiso
       result = d; // d is concrete
     }
 
-    // Now check if the method is ambiguous
+    // Then the superinterfaces' choice: the most specific default method, or ambiguous (Shiklo fork, 2026-10-28: any
+    // two different defaults counted as ambiguous, so a class extending AbstractCollection and implementing List had
+    // no spliterator(): List's default is more specific than Collection's, which came through the superclass).
     cp_method *d_method = get_unambiguous_method(d);
     slice identifier = identify(&scratch, d_method);
-    if (hash_table_lookup(&poisoned, identifier.chars, identifier.len)) {
+    void *choice = hash_table_lookup(&selected, identifier.chars, identifier.len);
+    if (choice == SELECTED_AMBIGUOUS) {
       result = mark_ambiguous(result);
+    } else if (choice) {
+      result = make(choice);
     }
 
     // Then check to see if the class or a superclass has a matching method
@@ -112,14 +132,15 @@ static void setup_itables(classdesc *super, classdesc *cd) {
   itables *itables = &cd->itables;
   DCHECK(!itables->interfaces, "i-tables already set up");
 
-  // Scan superinterface itables for conflicting methods, i.e., methods which
-  // have the same name and descriptor.
+  // Collect, for each methodname:descriptor, the distinct interface methods the superinterfaces' and the
+  // superclass's i-tables hold for it, then decide what the class gets from its superinterfaces.
   INIT_STACK_STRING(scratch, 1024);
-  // Map methodname:descriptor to a pointer to the existing method
+  // Map methodname:descriptor to 1 + an index into candidates
   string_hash_table discovered = make_hash_table(nullptr, 0.75, 16);
-  // Map methodname:descriptor to 1 if that method name is ambiguous among
-  // the superinterfaces.
-  string_hash_table ambiguous = make_hash_table(nullptr, 0.75, 16);
+  cp_method ***candidates = nullptr; // per methodname:descriptor, its distinct methods
+  bool *poisoned = nullptr;          // per methodname:descriptor, a superinterface found it ambiguous already
+  // Map methodname:descriptor to the selected method, or SELECTED_AMBIGUOUS
+  string_hash_table selected = make_hash_table(nullptr, 0.75, 16);
 
   for (int iface_i = 0; iface_i <= cd->interfaces_count; ++iface_i) {
     classdesc *iface;
@@ -138,17 +159,54 @@ static void setup_itables(classdesc *super, classdesc *cd) {
         if (!(underlying->my_class->access_flags & ACCESS_INTERFACE))
           continue;
         slice ident = identify(&scratch, underlying);
-        void *existing = hash_table_lookup(&discovered, ident.chars, ident.len);
-        if ((existing && existing != underlying) || is_ambiguous(ref)) {
-          // Ambiguity across superinterfaces :o
-          (void)hash_table_insert(&ambiguous, ident.chars, ident.len, (void *)1);
-        } else if (existing == nullptr) {
-          (void)hash_table_insert(&discovered, ident.chars, ident.len, underlying);
+        intptr_t index = (intptr_t)hash_table_lookup(&discovered, ident.chars, ident.len) - 1;
+        if (index < 0) {
+          index = arrlen(candidates);
+          arrput(candidates, nullptr);
+          arrput(poisoned, false);
+          (void)hash_table_insert(&discovered, ident.chars, ident.len, (void *)(index + 1));
         }
+        if (is_ambiguous(ref))
+          poisoned[index] = true;
+        bool known = false;
+        for (int k = 0; k < arrlen(candidates[index]); ++k)
+          known |= candidates[index][k] == underlying;
+        if (!known)
+          arrput(candidates[index], underlying);
       }
     }
   }
 
+  hash_table_iterator it = hash_table_get_iterator(&discovered);
+  char *key;
+  size_t key_len;
+  void *value;
+  while (hash_table_iterator_has_next(it, &key, &key_len, &value)) {
+    intptr_t index = (intptr_t)value - 1;
+    cp_method **methods = candidates[index];
+    void *choice = nullptr;
+    int concrete = 0;
+    for (int k = 0; k < arrlen(methods); ++k) {
+      // Maximally specific: no other candidate is declared in a subinterface of this one's interface.
+      bool maximal = true;
+      for (int j = 0; j < arrlen(methods) && maximal; ++j)
+        maximal = j == k || !extends_interface(methods[j]->my_class, methods[k]->my_class);
+      if (maximal && !(methods[k]->access_flags & ACCESS_ABSTRACT)) {
+        choice = methods[k];
+        ++concrete;
+      }
+    }
+    if (poisoned[index] || concrete > 1)
+      choice = SELECTED_AMBIGUOUS;
+    if (choice)
+      (void)hash_table_insert(&selected, key, (int)key_len, choice);
+    hash_table_iterator_next(&it);
+  }
+
+  for (int i = 0; i < arrlen(candidates); ++i)
+    arrfree(candidates[i]);
+  arrfree(candidates);
+  arrfree(poisoned);
   free_hash_table(discovered);
 
   // Now merge the itables of the superinterfaces. Whenever we encounter a
@@ -179,13 +237,13 @@ static void setup_itables(classdesc *super, classdesc *cd) {
       *merge_with = copy_itable(super_itable);
 
     merge:
-      merge_itable(merge_with, super_itable, ambiguous, cd);
+      merge_itable(merge_with, super_itable, selected, cd);
     }
   }
 
   // make sure the lookup vector and the result vector have the same length
   DCHECK(arrlen(itables->interfaces) == arrlen(itables->entries));
-  free_hash_table(ambiguous);
+  free_hash_table(selected);
 }
 
 // TODO consider optimizing final methods out of the tables?

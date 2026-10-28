@@ -24,14 +24,14 @@
       },
       {
         "path": "patches/0004-shiklo-float-constants.patch",
-        "sha256": "702bea350519ed6ca646781f0a015233c60e03959a1f65f728273228b6fbf417"
+        "sha256": "dbf586de3658b64720167cf47089f698c9cd1bfbdc5f404666317529857a051e"
       }
     ],
     "patchedFiles": {
       "compiler/build.gradle": "4da3057f9f940856d256cc5e68d4083831c24ad14487a90080620d1563f54f1e",
       "compiler/src/main/java/org/teavm/javac/Compiler.java": "3abc53fd39d6c7929a59e7cf39a02003861043c82550b35cf6df5c75fb31ed91",
       "compiler/src/main/java/org/teavm/javac/FileData.java": "d4ba43172f26b707a64858e60a642652fd45aea18847205c85128b26598507c0",
-      "javac/build.gradle": "e7ac156e6ad43029af89b5b38c58ba2424f5df811207de2fb13dfe2d177a9855",
+      "javac/build.gradle": "71f0bf02b2f487447e42f3d015eaeb32c98050349c9c86b2d51c8d58bd34086a",
       "settings.gradle": "8e7a9e72c518b3abb09ceb454d8908e767d4e9728c9240629c3378122440d90a"
     }
   },

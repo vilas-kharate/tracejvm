@@ -510,7 +510,8 @@ typedef struct vm {
   mmap_allocation *mmap_allocations;
 
   // Vector of z_streams, to be freed
-  void **z_streams; // z_stream **
+  void **z_streams;         // z_stream **, Inflater's
+  void **z_deflate_streams; // z_stream **, Deflater's (they end with deflateEnd)
 
   // Latest TID
   s32 next_tid;

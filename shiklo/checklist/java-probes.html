@@ -537,6 +537,356 @@ true
 Main.main(Main.java:10)
 </script>
 
+<!-- P15a-d: every way a program ends itself. Shutdown.halt0 returned, so only System.exit written in the visitor's
+     source stopped the program (the page rewrites it to $.Sys$.exit, which did not run shutdown hooks). Now halt0 sends
+     the page's exit signal, and $.Sys$.exit goes through Runtime.exit (hooks first, as in the JDK). -->
+<script type="text/x-java" data-id="P15a" data-name="exit: Runtime.getRuntime().exit runs the shutdown hooks and stops" data-code="3">
+public class Main {
+    public static void main(String[] a) {
+        System.out.println("before");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("hook")));
+        Runtime.getRuntime().exit(3);
+        System.out.println("never");
+    }
+}
+</script>
+<script type="text/plain" data-out="P15a">
+before
+hook
+</script>
+
+<script type="text/x-java" data-id="P15b" data-name="exit: Runtime.getRuntime().halt stops at once (no hooks)" data-code="4">
+public class Main {
+    public static void main(String[] a) {
+        System.out.println("before");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("hook")));
+        Runtime.getRuntime().halt(4);
+        System.out.println("never");
+    }
+}
+</script>
+<script type="text/plain" data-out="P15b">
+before
+</script>
+
+<script type="text/x-java" data-id="P15c" data-name="exit: System::exit as a method reference (not rewritten by the page)" data-code="5">
+import java.util.function.IntConsumer;
+public class Main {
+    public static void main(String[] a) {
+        System.out.println("before");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("hook")));
+        IntConsumer exit = System::exit;
+        exit.accept(5);
+        System.out.println("never");
+    }
+}
+</script>
+<script type="text/plain" data-out="P15c">
+before
+hook
+</script>
+
+<script type="text/x-java" data-id="P15d" data-name="exit: System.exit runs the shutdown hooks" data-code="2">
+public class Main {
+    public static void main(String[] a) {
+        System.out.println("before");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("hook")));
+        System.exit(2);
+        System.out.println("never");
+    }
+}
+</script>
+<script type="text/plain" data-out="P15d">
+before
+hook
+</script>
+
+<!-- P16a-b: java.util.zip. Deflater and Adler32 had no natives (UnsatisfiedLinkError: ZipOutputStream, GZIPOutputStream,
+     the jar tool), Inflater lacked dictionaries, direct buffers and getAdler and reported a corrupt stream as finished.
+     P16b prints compressed sizes, which depend on the zlib version (the JDK's and Emscripten's are both 1.3.1). -->
+<script type="text/x-java" data-id="P16a" data-name="java.util.zip: checksums, Deflater / Inflater, GZIP, ZIP, errors, dictionaries, direct buffers">
+import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.zip.*;
+
+public class Main {
+    public static void main(String[] a) throws Exception {
+        byte[] text = "to be or not to be, that is the question. ".repeat(40).getBytes(StandardCharsets.UTF_8);
+        CRC32 crc = new CRC32();
+        crc.update(text);
+        crc.update(65);
+        Adler32 adler = new Adler32();
+        adler.update(text, 5, 100);
+        adler.update(ByteBuffer.wrap(text));
+        CRC32 direct = new CRC32();
+        ByteBuffer d = ByteBuffer.allocateDirect(text.length).put(text).flip();
+        direct.update(d);
+        System.out.println("crc " + Long.toHexString(crc.getValue()) + " adler " + Long.toHexString(adler.getValue())
+            + " direct " + Long.toHexString(direct.getValue()) + " crc32c " + Long.toHexString(crc32c(text)));
+
+        Deflater def = new Deflater(Deflater.BEST_COMPRESSION);
+        def.setInput(text);
+        def.finish();
+        byte[] buf = new byte[4096];
+        int n = def.deflate(buf);
+        System.out.println("deflate finished " + def.finished() + " in " + def.getBytesRead() + " smaller " + (n < text.length / 10));
+        def.end();
+        Inflater inf = new Inflater();
+        inf.setInput(buf, 0, n);
+        byte[] back = new byte[text.length];
+        int m = inf.inflate(back);
+        System.out.println("inflate " + m + " finished " + inf.finished() + " same " + Arrays.equals(back, text) + " remaining " + inf.getRemaining());
+        inf.end();
+
+        ByteArrayOutputStream gz = new ByteArrayOutputStream();
+        try (GZIPOutputStream g = new GZIPOutputStream(gz)) { g.write(text); }
+        try (GZIPInputStream g = new GZIPInputStream(new ByteArrayInputStream(gz.toByteArray()))) {
+            System.out.println("gzip same " + Arrays.equals(g.readAllBytes(), text));
+        }
+
+        ByteArrayOutputStream zip = new ByteArrayOutputStream();
+        try (ZipOutputStream z = new ZipOutputStream(zip)) {
+            z.putNextEntry(new ZipEntry("a.txt"));
+            z.write(text);
+            z.closeEntry();
+            ZipEntry stored = new ZipEntry("dir/b.bin");
+            stored.setMethod(ZipEntry.STORED);
+            stored.setSize(3);
+            CRC32 c3 = new CRC32();
+            c3.update(new byte[] { 1, 2, 3 });
+            stored.setCrc(c3.getValue());
+            z.putNextEntry(stored);
+            z.write(new byte[] { 1, 2, 3 });
+            z.closeEntry();
+        }
+        try (ZipInputStream z = new ZipInputStream(new ByteArrayInputStream(zip.toByteArray()))) {
+            for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
+                byte[] data = z.readAllBytes();
+                System.out.println("entry " + e.getName() + " " + data.length + " method " + e.getMethod());
+            }
+        }
+        File f = new File("t.zip");
+        try (FileOutputStream o = new FileOutputStream(f)) { o.write(zip.toByteArray()); }
+        try (ZipFile zf = new ZipFile(f)) {
+            System.out.println("zipfile " + zf.size() + " " + new String(zf.getInputStream(zf.getEntry("a.txt")).readAllBytes(), StandardCharsets.UTF_8).length());
+        }
+
+        try {
+            Inflater bad = new Inflater();
+            bad.setInput(new byte[] { 0x78, (byte) 0x9c, 1, 2, 3, 4, 5, 6, 7 });
+            bad.inflate(new byte[100]);
+            System.out.println("no error");
+        } catch (DataFormatException e) {
+            System.out.println("DataFormatException: " + e.getMessage());
+        }
+
+        byte[] dict = "the question".getBytes(StandardCharsets.UTF_8);
+        Deflater dd = new Deflater();
+        dd.setDictionary(dict);
+        dd.setInput(text);
+        dd.finish();
+        int dn = dd.deflate(buf);
+        Inflater di = new Inflater();
+        di.setInput(buf, 0, dn);
+        int first = di.inflate(back);
+        System.out.println("needs dictionary " + di.needsDictionary() + " " + first + " adler " + Long.toHexString(di.getAdler()));
+        di.setDictionary(dict);
+        int got = di.inflate(back);
+        System.out.println("with dictionary " + got + " same " + Arrays.equals(back, text));
+
+        Deflater lv = new Deflater(Deflater.NO_COMPRESSION);
+        ByteArrayOutputStream two = new ByteArrayOutputStream();
+        lv.setInput(text, 0, 800);
+        while (!lv.needsInput()) two.write(buf, 0, lv.deflate(buf, 0, buf.length, Deflater.NO_FLUSH));
+        lv.setLevel(Deflater.BEST_SPEED);
+        lv.setInput(text, 800, text.length - 800);
+        lv.finish();
+        while (!lv.finished()) two.write(buf, 0, lv.deflate(buf));
+        Inflater li = new Inflater();
+        li.setInput(two.toByteArray());
+        byte[] all = new byte[text.length];
+        int total = 0;
+        while (!li.finished()) total += li.inflate(all, total, all.length - total);
+        System.out.println("level change " + total + " same " + Arrays.equals(all, text));
+
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        try (DeflaterOutputStream o = new DeflaterOutputStream(raw, new Deflater(9, true), 64, true)) {
+            o.write(text, 0, 100);
+            o.flush();
+            System.out.println("sync flush gave output " + (raw.size() > 0));
+            o.write(text, 100, text.length - 100);
+        }
+        try (InflaterInputStream i = new InflaterInputStream(new ByteArrayInputStream(raw.toByteArray()), new Inflater(true))) {
+            System.out.println("nowrap same " + Arrays.equals(i.readAllBytes(), text));
+        }
+        ByteBuffer src = ByteBuffer.allocateDirect(text.length).put(text).flip();
+        ByteBuffer dst = ByteBuffer.allocateDirect(4096);
+        Deflater bd = new Deflater();
+        bd.setInput(src);
+        bd.finish();
+        bd.deflate(dst);
+        dst.flip();
+        Inflater bi = new Inflater();
+        bi.setInput(dst);
+        ByteBuffer out = ByteBuffer.allocateDirect(text.length);
+        bi.inflate(out);
+        out.flip();
+        byte[] o2 = new byte[out.remaining()];
+        out.get(o2);
+        System.out.println("direct buffers same " + Arrays.equals(o2, text));
+    }
+
+    static long crc32c(byte[] b) {
+        CRC32C c = new CRC32C();
+        c.update(b);
+        return c.getValue();
+    }
+}
+</script>
+<script type="text/plain" data-out="P16a">
+crc f0ae4331 adler 3d1d61f7 direct aeba05f7 crc32c a5b71038
+deflate finished true in 1680 smaller true
+inflate 1680 finished true same true remaining 0
+gzip same true
+entry a.txt 1680 method 8
+entry dir/b.bin 3 method 0
+zipfile 2 1680
+DataFormatException: invalid stored block lengths
+needs dictionary true 0 adler 1eb504da
+with dictionary 1680 same true
+level change 1680 same true
+sync flush gave output true
+nowrap same true
+direct buffers same true
+</script>
+
+<script type="text/x-java" data-id="P16b" data-name="java.util.zip: compressed sizes (zlib 1.3.1)">
+import java.io.*;
+import java.util.zip.*;
+public class Main {
+    public static void main(String[] a) throws Exception {
+        byte[] text = "to be or not to be, that is the question. ".repeat(40).getBytes("UTF-8");
+        for (int level : new int[] { 1, 6, 9 }) {
+            Deflater d = new Deflater(level);
+            d.setInput(text);
+            d.finish();
+            byte[] out = new byte[4096];
+            System.out.println("level " + level + ": " + text.length + " -> " + d.deflate(out) + " bytes");
+            d.end();
+        }
+        ByteArrayOutputStream gz = new ByteArrayOutputStream();
+        try (GZIPOutputStream g = new GZIPOutputStream(gz)) { g.write(text); }
+        System.out.println("gzip " + gz.size() + " bytes");
+    }
+}
+</script>
+<script type="text/plain" data-out="P16b">
+level 1: 1680 -> 65 bytes
+level 6: 1680 -> 62 bytes
+level 9: 1680 -> 62 bytes
+gzip 74 bytes
+</script>
+
+<!-- P17: default method selection (JVMS 5.4.6). Any two different defaults for one method counted as ambiguous, so a
+     class that extends AbstractCollection and implements List (javac's own List; jshell stopped on it) had no
+     spliterator(): AbstractMethodError, although List's default is more specific than Collection's. -->
+<script type="text/x-java" data-id="P17" data-name="default methods: the most specific one is selected">
+import java.util.*;
+import java.util.function.*;
+
+public class Main {
+    // As javac's own List: extends AbstractCollection and implements List, so spliterator() has three defaults
+    // (Iterable, Collection, List) and List's is the most specific.
+    static class Chain<A> extends AbstractCollection<A> implements List<A> {
+        private final List<A> items;
+        Chain(List<A> items) { this.items = items; }
+        public Iterator<A> iterator() { return items.iterator(); }
+        public int size() { return items.size(); }
+        public A get(int i) { return items.get(i); }
+        public A set(int i, A a) { throw new UnsupportedOperationException(); }
+        public void add(int i, A a) { throw new UnsupportedOperationException(); }
+        public A remove(int i) { throw new UnsupportedOperationException(); }
+        public int indexOf(Object o) { return items.indexOf(o); }
+        public int lastIndexOf(Object o) { return items.lastIndexOf(o); }
+        public ListIterator<A> listIterator() { return items.listIterator(); }
+        public ListIterator<A> listIterator(int i) { return items.listIterator(i); }
+        public List<A> subList(int a, int b) { return items.subList(a, b); }
+        public boolean addAll(int i, Collection<? extends A> c) { throw new UnsupportedOperationException(); }
+    }
+
+    static class Squares extends AbstractList<Integer> {
+        public Integer get(int i) { return i * i; }
+        public int size() { return 5; }
+    }
+
+    interface Named { default String name() { return "Named"; } }
+    interface Titled extends Named { default String name() { return "Titled"; } }
+    static class Book implements Named, Titled {}
+    static class Novel extends Book implements Named {}
+
+    public static void main(String[] a) {
+        Chain<String> c = new Chain<>(List.of("x", "y", "z"));
+        Iterable<String> it = c;
+        System.out.println(it.spliterator().characteristics() + " " + ((Collection<String>) c).spliterator().characteristics() + " " + c.spliterator().characteristics());
+        System.out.println(c.stream().map(String::toUpperCase).toList());
+        Squares s = new Squares();
+        System.out.println(s.stream().mapToInt(Integer::intValue).sum() + " " + ((Iterable<Integer>) s).spliterator().characteristics());
+        System.out.println(new Book().name() + " " + new Novel().name() + " " + ((Named) new Novel()).name());
+        List<String> sorted = new ArrayList<>(c);
+        c.forEach(x -> sorted.add(x + "!"));
+        System.out.println(sorted);
+    }
+}
+</script>
+<script type="text/plain" data-out="P17">
+16464 16464 16464
+[X, Y, Z]
+30 16464
+Titled Titled Titled
+[x, y, z, x!, y!, z!]
+</script>
+
+<!-- P18: other threads' stack traces (Thread.dumpThreads and getStackTrace0 were missing: UnsatisfiedLinkError). Only
+     what every JVM shows: the frames of a waiting thread below the program's own differ between implementations. -->
+<script type="text/x-java" data-id="P18" data-name="threads: getAllStackTraces, another thread's getStackTrace">
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
+
+public class Main {
+    static final CountDownLatch started = new CountDownLatch(1);
+
+    static void work() {
+        started.countDown();
+        try { Thread.sleep(10_000); } catch (InterruptedException e) { System.out.println("worker interrupted"); }
+    }
+
+    public static void main(String[] a) throws Exception {
+        Thread t = new Thread(Main::work, "worker");
+        t.start();
+        started.await();
+        Thread.sleep(100);
+        Map<Thread, StackTraceElement[]> all = Thread.getAllStackTraces();
+        System.out.println(all.containsKey(Thread.currentThread()) + " " + all.containsKey(t));
+        System.out.println(Arrays.stream(all.get(Thread.currentThread())).anyMatch(e -> e.getClassName().equals("Main") && e.getMethodName().equals("main")));
+        System.out.println(Arrays.stream(t.getStackTrace()).anyMatch(e -> e.getClassName().equals("Main") && e.getMethodName().equals("work")));
+        System.out.println(new Thread(() -> {}).getStackTrace().length + " " + t.getState());
+        t.interrupt();
+        t.join();
+        System.out.println(t.getStackTrace().length);
+    }
+}
+</script>
+<script type="text/plain" data-out="P18">
+true true
+true
+true
+0 TIMED_WAITING
+worker interrupted
+0
+</script>
+
 <script type="text/x-java" data-id="P13" data-name="bug 13: a server and a client on localhost, then an unreachable address">
 import java.io.*;
 import java.net.*;

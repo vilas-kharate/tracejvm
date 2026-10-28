@@ -42,7 +42,8 @@ public final class Sys$ {
         Exit(int status) { super(null, null, false, false); this.status = status; }
     }
     public static void exit(int status) {
-        System.out.flush();
+        Runtime.getRuntime().exit(status);   // the shutdown hooks, then the VM's halt stops the program (build 16 on)
+        System.out.flush();                  // an older VM's halt returned: stop it here
         System.err.print("\\u001b]lmpb-exit;" + status + "\\u0007");   // the page stops the program here
         throw new Exit(status);
     }

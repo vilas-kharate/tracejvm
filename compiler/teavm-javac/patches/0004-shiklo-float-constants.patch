@@ -1,22 +1,26 @@
-TraceJVM (Shiklo fork, 2026-10-28): javac constant folding with the JDK's floating point. javac runs on TeaVM,
-which compiles -x as 0.0 - x (a folded -0.0 lost its sign) and formats doubles and floats with its own
-Double.toString / Float.toString. ConstFold negates by flipping the sign bit; Type.stringValue() uses the JDK's
-jdk.internal.math conversion, copied into javac as com.sun.tools.javac.util.fp.
+TraceJVM (Shiklo fork, 2026-10-28): javac floating point as the JDK's. javac runs on TeaVM, which compiles -x as
+0.0 - x (a folded -0.0 lost its sign), formats doubles and floats with its own Double.toString / Float.toString,
+and reads literals with its own Double.valueOf / Float.valueOf (subnormals became "too small", hexadecimal ones
+NaN). ConstFold negates by flipping the sign bit; Type.stringValue() and JavacParser use the JDK's
+jdk.internal.math conversion and parser, copied into javac as com.sun.tools.javac.util.fp.
 
 --- a/javac/build.gradle
 +++ b/javac/build.gradle
-@@ -119,4 +119,94 @@
+@@ -119,4 +119,121 @@
      source fileTree(baseSrcDir.dir("java.base/share/classes/")) {
          include "jdk/internal/jmod/**"
      }
 +}
 +
-+// TraceJVM (Shiklo fork, 2026-10-28): javac runs on TeaVM, so its constant folding used TeaVM's floating point, which
-+// differs from the JDK's in two places. TeaVM compiles -x as 0.0 - x, so a folded -0.0 or -0.0f lost its sign
-+// (Double.compare(0.0, -0.0) gave 0). TeaVM's Double.toString and Float.toString format some values differently, and
-+// javac formats folded string constants with them ("" + Double.MIN_VALUE gave 4.940656458412465E-324). After the JDK
-+// sources are unpacked, ConstFold negates by flipping the sign bit, and Type.stringValue() formats doubles and floats
-+// with the JDK's own conversion (jdk.internal.math), copied into javac as com.sun.tools.javac.util.fp.
++// TraceJVM (Shiklo fork, 2026-10-28): javac runs on TeaVM, so its floating point was TeaVM's, which differs from the
++// JDK's in three places. TeaVM compiles -x as 0.0 - x, so a folded -0.0 or -0.0f lost its sign (Double.compare(0.0,
++// -0.0) gave 0). TeaVM's Double.toString and Float.toString format some values differently, and javac formats folded
++// string constants with them ("" + Double.MIN_VALUE gave 4.940656458412465E-324). TeaVM's Double.valueOf and
++// Float.valueOf, which read literals, give 0 for subnormal values (4.9E-324 and 1.4E-45f were "floating-point number
++// too small") and do not read hexadecimal ones (0x1.8p1 compiled to NaN). After the JDK sources are unpacked,
++// ConstFold negates by flipping the sign bit, Type.stringValue() formats doubles and floats with the JDK's own
++// conversion and JavacParser reads literals with the JDK's own parser (jdk.internal.math, copied into javac as
++// com.sun.tools.javac.util.fp).
 +def shikloMathUtilsAdditions = '''
 +    // TraceJVM (Shiklo fork): javac runs on TeaVM, whose class library has neither Math.multiplyHigh nor
 +    // String(byte[], int, int, int); these are the JDK's own versions.
@@ -80,17 +84,41 @@ jdk.internal.math conversion, copied into javac as com.sun.tools.javac.util.fp.
 +                return cv.toString();
 +            }'''],
 +        ])
++        edit("jdk.compiler/share/classes/com/sun/tools/javac/parser/JavacParser.java", [
++            ["n = Float.valueOf(proper);", "n = com.sun.tools.javac.util.fp.FloatingDecimal.parseFloat(proper);"],
++            ["n = Double.valueOf(proper);", "n = com.sun.tools.javac.util.fp.FloatingDecimal.parseDouble(proper);"],
++        ])
++        // Each copied file and its changes besides the package. TeaVM's class library has neither Math.multiplyHigh,
++        // String(byte[], int, int, int) nor Math.clamp(float, float, float); CDS is the JDK's class-data sharing.
++        def decimalChanges = [
++            ["import static jdk.internal.math.MathUtils.*;", "import static com.sun.tools.javac.util.fp.MathUtils.*;"],
++            ["import static java.lang.Math.multiplyHigh;", ""],
++            ["new String(bytes, 0, 0, index + 1)", "latin1(bytes, index + 1)"],
++        ]
++        def copies = [
++            "MathUtils": [],
++            "DoubleToDecimal": decimalChanges,
++            "FloatToDecimal": decimalChanges,
++            "FormattedFPDecimal": [],
++            "FloatingDecimal": [
++                ["Math.clamp((float) dValue, Float.MIN_VALUE, Float.MAX_VALUE)",
++                 "Math.min(Math.max((float) dValue, Float.MIN_VALUE), Float.MAX_VALUE)"],
++            ],
++            "FDBigInteger": [
++                ["import jdk.internal.misc.CDS;", ""],
++                ["CDS.initializeFromArchive(FDBigInteger.class);", ""],
++            ],
++            "DoubleConsts": [],
++            "FloatConsts": [],
++        ]
 +        def fpDir = baseSrcDir.dir("jdk.compiler/share/classes/com/sun/tools/javac/util/fp").asFile
 +        fpDir.mkdirs()
-+        for (name in ["MathUtils", "DoubleToDecimal", "FloatToDecimal", "FormattedFPDecimal"]) {
++        copies.each { name, changes ->
 +            def where = "jdk/internal/math/" + name + ".java"
 +            def text = baseSrcDir.file("java.base/share/classes/" + where).asFile.getText("UTF-8")
 +            text = replaceOnce(text, "package jdk.internal.math;", "package com.sun.tools.javac.util.fp;", where)
-+            if (name == "DoubleToDecimal" || name == "FloatToDecimal") {
-+                text = replaceOnce(text, "import static jdk.internal.math.MathUtils.*;",
-+                        "import static com.sun.tools.javac.util.fp.MathUtils.*;", where)
-+                text = replaceOnce(text, "import static java.lang.Math.multiplyHigh;", "", where)
-+                text = replaceOnce(text, "new String(bytes, 0, 0, index + 1)", "latin1(bytes, index + 1)", where)
++            for (pair in changes) {
++                text = replaceOnce(text, pair[0], pair[1], where)
 +            }
 +            if (name == "MathUtils") {
 +                int end = text.lastIndexOf("}")

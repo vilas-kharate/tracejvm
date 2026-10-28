@@ -36,22 +36,44 @@ THIRD_PARTY_NOTICES.md).
   `javax.xml` and the other profile modules did not compile although their classes are in the platform jar.
 - 2026-10-28: probes P7b (is the `-0.0` constant in the class file javac wrote?), P7c / P7d (javac's floating point:
   decimal and hexadecimal literals, folded string constants, folded `-0.0`), P12k (the hanging pool with a watchdog
-  that prints a thread dump after 3 s), P12l (the main thread parks, another thread unparks it) and P14 (stack-trace
-  format).
-- 2026-10-28: javac's constant folding uses the JDK's floating point (bug 7; `compiler/teavm-javac/patches/0004`,
-  overlay version 4). javac runs on TeaVM 0.13.1, which compiles `-x` as `0.0 - x`
-  (`BaseWasmGenerationVisitor`, NEGATE), so a folded `-0.0` / `-0.0f` became `+0.0`; and javac formatted folded string
-  constants with TeaVM's `Double.toString` (`"" + Double.MIN_VALUE` gave `4.940656458412465E-324`). The patch makes
-  `javac/build.gradle` edit the unpacked OpenJDK sources: `ConstFold` negates by flipping the sign bit, and
-  `Type.stringValue()` formats doubles and floats with the JDK's `jdk.internal.math` conversion, copied into javac as
-  `com.sun.tools.javac.util.fp` (with `multiplyHigh` and a Latin-1 string helper, which TeaVM's class library lacks).
-  Checked on a desktop JDK: the copied conversion gives the same text as `Double.toString` / `Float.toString` for
-  800,039 values (edge cases, random bit patterns, subnormals).
+  that prints a thread dump after 3 s), P12l (the main thread parks, another thread unparks it), P14 (stack-trace
+  format) and P15a-d (every way a program ends itself).
+- 2026-10-28: javac's floating point is the JDK's (bug 7; `compiler/teavm-javac/patches/0004`, overlay version 4).
+  javac runs on TeaVM 0.13.1, which compiles `-x` as `0.0 - x` (`BaseWasmGenerationVisitor`, NEGATE), so a folded
+  `-0.0` / `-0.0f` became `+0.0`; javac formatted folded string constants with TeaVM's `Double.toString`
+  (`"" + Double.MIN_VALUE` gave `4.940656458412465E-324`); and it read literals with TeaVM's `Double.valueOf` /
+  `Float.valueOf`, which give 0 for subnormals (`4.9E-324`, `1.4E-45f`: "floating-point number too small") and fail on
+  hexadecimal ones, which javac then compiled as NaN (`0x1.8p1`; seen on builds 8 and 15, probes P7c-d). The patch
+  makes `javac/build.gradle` edit the unpacked OpenJDK sources: `ConstFold` negates by flipping the sign bit,
+  `Type.stringValue()` formats with the JDK's DoubleToDecimal / FloatToDecimal, and `JavacParser` reads literals with
+  the JDK's FloatingDecimal, all copied from `jdk.internal.math` into javac as `com.sun.tools.javac.util.fp` (with
+  `multiplyHigh`, a Latin-1 string helper and a float clamp, which TeaVM's class library lacks, and without CDS).
+  Checked on a desktop JDK: the copies give the JDK's results in 1,150,287 checks (formatting of edge cases, random
+  bit patterns and subnormals; parsing of decimal, hexadecimal, subnormal, overflowing and random literals).
 - 2026-10-28: the scheduler sets a thread's `eetop` again when it queues a call on it (`vm/roundrobin_scheduler.c`).
   `free_thread_info` cleared it when the host's previous call on the main thread ended, and the host makes two calls
   per program on a reused VM, so from the second program on `unpark(main)` was dropped: an untimed `Future.get` or
   `Condition.await` on the main thread never woke (bug 12; timed waits returned at their timeout) and
-  `Thread.currentThread().isAlive()` was false.
+  `Thread.currentThread().isAlive()` was false. Seen on build 15: the second program of a VM printed `alive false`
+  and its `parkNanos(3 s)` ran the full 3 s although another thread unparked it after 200 ms.
+- 2026-10-28: `java.util.zip` natives completed (`natives/share/java/util/zip/`): Deflater (it had none, so
+  `ZipOutputStream`, `GZIPOutputStream`, `JarOutputStream` and the jar tool failed with UnsatisfiedLinkError), Adler32,
+  `CRC32.update(int)` / `updateByteBuffer0`, and Inflater's direct-buffer variants, dictionaries and `getAdler`; a
+  corrupt stream throws DataFormatException with zlib's message (it was reported as finished). Written from the JDK
+  23 classes' contract (OpenJDK's C sources are GPLv2-only); Deflater streams are freed with `deflateEnd` at VM exit
+  (`vm->z_deflate_streams`). Probes P16a-b.
+- 2026-10-28: default methods are selected as JVMS 5.4.6 says (`vm/vtable.c`): of the maximally-specific
+  superinterface methods, the one that is not abstract. Any two different defaults for one method counted as
+  ambiguous, so a class extending AbstractCollection and implementing List (javac's own List, which jshell iterates)
+  had no `spliterator()`: AbstractMethodError, although List's default is more specific than Collection's. Probe P17.
+- 2026-10-28: `Thread.dumpThreads` and `Thread.getStackTrace0` (`natives/share/java/lang/Thread.c`; both missing:
+  `Thread.getAllStackTraces()` and another thread's `getStackTrace()` threw UnsatisfiedLinkError). The element
+  building of `Throwable.fillInStackTrace` is now `make_stack_trace_elements`, which walks any thread's frames.
+  Probe P18.
+- 2026-10-28: `Shutdown.halt0` ends the program (`natives/share/java/lang/Runtime.c`). It returned, so `System.exit`
+  from code the page does not rewrite (the JDK's own tools, `Runtime.getRuntime().exit` / `halt`, `System::exit`) went
+  on with the program. With a routed error stream it writes the page's exit signal (`ESC ] lmpb-exit;<status> BEL`),
+  which the host never answers, so the VM stops there; shutdown hooks have run by then (probes P15a-d).
 - 2026-10-28: method-handle constants of kind getStatic, putField and putStatic (JVMS 5.4.3.5) — only getField was
   supported, and the others aborted the VM ("Unsupported method handle kind"), e.g. in a `switch` on a record pattern
   with a `when` guard; field handles resolve the field's class, put kinds make setters (`vm/bjvm.c`).

@@ -30,6 +30,43 @@ DECLARE_NATIVE("java/lang", Thread, getThreads, "()[Ljava/lang/Thread;") {
   return (stack_value){.obj = result};
 }
 
+obj_header *make_stack_trace_elements(vm_thread *thread, stack_frame *top); // Throwable.c
+
+// Thread.getAllStackTraces and another thread's getStackTrace (Shiklo fork, 2026-10-28; both natives were missing:
+// UnsatisfiedLinkError). Each thread's frames come from its own VM stack; a thread that has not started or has ended
+// gets an empty trace, as in HotSpot.
+DECLARE_NATIVE("java/lang", Thread, dumpThreads, "([Ljava/lang/Thread;)[[Ljava/lang/StackTraceElement;") {
+  if (!args[0].handle->obj) {
+    raise_null_pointer_exception(thread);
+    return value_null();
+  }
+  classdesc *trace_type = get_or_create_array_classdesc(thread, cached_classes(thread->vm)->stack_trace_element);
+  if (!trace_type)
+    return value_null();
+  int count = ArrayLength(args[0].handle->obj);
+  handle *result = make_handle(thread, CreateObjectArray1D(thread, trace_type, count));
+  if (!result->obj) {
+    drop_handle(thread, result);
+    return value_null();
+  }
+  for (int i = 0; i < count; ++i) {
+    struct native_Thread *t = ((struct native_Thread **)ArrayData(args[0].handle->obj))[i];
+    vm_thread *target = t ? (vm_thread *)t->eetop : nullptr;
+    obj_header *trace = make_stack_trace_elements(thread, target ? target->stack.top : nullptr);
+    if (!trace)
+      break; // out of memory: the exception is pending
+    ((obj_header **)ArrayData(result->obj))[i] = trace;
+  }
+  obj_header *traces = result->obj;
+  drop_handle(thread, result);
+  return (stack_value){.obj = traces};
+}
+
+// Thread.asyncGetStackTrace: an empty array makes the JDK ask dumpThreads for this one thread.
+DECLARE_NATIVE("java/lang", Thread, getStackTrace0, "()Ljava/lang/Object;") {
+  return (stack_value){.obj = CreateObjectArray1D(thread, cached_classes(thread->vm)->stack_trace_element, 0)};
+}
+
 DECLARE_NATIVE("java/lang", Thread, setPriority0, "(I)V") { return value_null(); }
 
 DECLARE_NATIVE("java/lang", Thread, holdsLock, "(Ljava/lang/Object;)Z") {
