@@ -68,6 +68,11 @@ inline int set_unpark_permit(vm_thread *thread) {
   return 0;
 }
 
+void set_thread_status(vm_thread *thread, s32 status) {
+  if (thread && thread->thread_obj && thread->thread_obj->holder)
+    StoreFieldInt(thread->thread_obj->holder, "threadStatus", status);
+}
+
 inline bool query_unpark_permit(vm_thread *thread) { return thread->unpark_permit; }
 
 bool has_expanded_data(header_word *data) { return !((uintptr_t)data->expanded_data & IS_MARK_WORD); }
@@ -901,6 +906,7 @@ vm_thread *create_main_thread(vm *vm, thread_options options) {
   call_interpreter_synchronous(
       thr, make_thread,
       (stack_value[]){{.obj = (void *)java_thr}, {.obj = main_thread_group}, {.obj = java_thr->name}});
+  set_thread_status(thr, THREAD_STATUS_RUNNABLE); // the constructor made a holder with threadStatus 0 (NEW)
 
 #undef java_thr
   drop_handle(thr, java_thread);
@@ -2592,9 +2598,97 @@ static bool cp_kind_is_primitive(cp_kind kind) {
   return kind == CP_KIND_INTEGER || kind == CP_KIND_FLOAT || kind == CP_KIND_LONG || kind == CP_KIND_DOUBLE;
 }
 
+// Runs an async function to its end on this thread (as exceptions.c initialises a class); one that would have to wait
+// raises BootstrapMethodError and jumps to fail.
+#define RUN_SYNCHRONOUSLY(result, method_name, ...)                                                                    \
+  do {                                                                                                                 \
+    method_name##_t sync_ctx_ = {.args = {__VA_ARGS__}};                                                               \
+    thread->stack.synchronous_depth++;                                                                                 \
+    future_t sync_future_ = method_name(&sync_ctx_);                                                                   \
+    thread->stack.synchronous_depth--;                                                                                 \
+    if (sync_future_.status != FUTURE_READY) {                                                                         \
+      raise_vm_exception(thread, STR("java/lang/BootstrapMethodError"), STR("dynamic constant: resolution blocked"));  \
+      goto fail;                                                                                                       \
+    }                                                                                                                  \
+    result = sync_ctx_._result;                                                                                        \
+  } while (0)
+
+// A dynamic constant (CONSTANT_Dynamic, JVMS 5.4.3.6) as a bootstrap method's static argument (Shiklo fork,
+// 2026-10-29). javac makes them for pattern switches: ConstantBootstraps.primitiveClass for primitive record
+// components under a guard, EnumDesc constants for enum labels. They were not resolved (UNREACHABLE, so undefined
+// behaviour, seen as "Unsupported method handle kind" and an aborted VM). Resolved as HotSpot does, through
+// MethodHandleNatives.linkDynamicConstant(caller, bootstrap method, name, type, static arguments). Synchronous, because
+// a dynamic constant's static arguments may be dynamic constants themselves. Null with an exception pending on failure.
+static obj_header *resolve_dynamic_constant(vm_thread *thread, cp_indy_info *condy, classloader *cl) {
+  bootstrap_method *bsm = condy->method;
+  stack_frame *top = thread->stack.top;
+  handle *bootstrap = nullptr, *static_args = nullptr, *name = nullptr, *caller = nullptr, *type_mirror = nullptr;
+  obj_header *result = nullptr;
+
+  cp_method *link = method_lookup(cached_classes(thread->vm)->method_handle_natives, STR("linkDynamicConstant"),
+                                  STR("(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/"
+                                      "lang/Object;)Ljava/lang/Object;"),
+                                  false, false);
+  if (!top || !link) {
+    raise_vm_exception(thread, STR("java/lang/BootstrapMethodError"), STR("dynamic constant: no caller"));
+    return nullptr;
+  }
+  caller = make_handle(thread, (obj_header *)get_class_mirror(thread, top->method->my_class));
+
+  struct native_MethodHandle *method_handle;
+  RUN_SYNCHRONOUSLY(method_handle, resolve_method_handle, thread, bsm->ref, cl);
+  if (thread->current_exception || !method_handle)
+    goto fail;
+  bootstrap = make_handle(thread, (obj_header *)method_handle);
+
+  static_args = make_handle(thread, CreateObjectArray1D(thread, cached_classes(thread->vm)->object, bsm->args_count));
+  if (!static_args->obj)
+    goto fail;
+  for (int i = 0; i < bsm->args_count; ++i) {
+    stack_value arg;
+    RUN_SYNCHRONOUSLY(arg, resolve_indy_static_argument, thread, bsm->args[i], cl);
+    if (thread->current_exception)
+      goto fail;
+    ReferenceArrayStore(static_args->obj, i, arg.obj);
+  }
+
+  name = make_handle(thread, MakeJStringFromModifiedUTF8(thread, condy->name_and_type->name, true));
+  if (!name->obj)
+    goto fail;
+  classdesc *type;
+  RUN_SYNCHRONOUSLY(type, load_class_of_field_descriptor, thread, cl, condy->name_and_type->descriptor);
+  if (thread->current_exception || !type)
+    goto fail;
+  type_mirror = make_handle(thread, (obj_header *)get_class_mirror(thread, type));
+
+  stack_value link_args[5] = {
+      {.obj = caller->obj}, {.obj = bootstrap->obj}, {.obj = name->obj}, {.obj = type_mirror->obj}, {.obj = static_args->obj}};
+  stack_value value = call_interpreter_synchronous(thread, link, link_args);
+  if (!thread->current_exception)
+    result = value.obj;
+
+fail:
+  if (type_mirror)
+    drop_handle(thread, type_mirror);
+  if (caller)
+    drop_handle(thread, caller);
+  if (name)
+    drop_handle(thread, name);
+  if (static_args)
+    drop_handle(thread, static_args);
+  if (bootstrap)
+    drop_handle(thread, bootstrap);
+  return result;
+}
+#undef RUN_SYNCHRONOUSLY
+
 DEFINE_ASYNC(resolve_indy_static_argument) {
 #define thread args->thread
 #define ent args->ent
+
+  if (ent->kind == CP_KIND_DYNAMIC_CONSTANT) {
+    ASYNC_RETURN((stack_value){.obj = resolve_dynamic_constant(thread, &ent->indy_info, args->cl)});
+  }
 
   if (cp_kind_is_primitive(ent->kind)) {
     ASYNC_RETURN(box_cp_integral(thread, ent->kind, ent));
@@ -2660,6 +2754,11 @@ DEFINE_ASYNC(indy_resolve) {
   for (; self->static_i < m->args_count; ++self->static_i) {
     cp_entry *arg = m->args[self->static_i];
     AWAIT(resolve_indy_static_argument, thread, arg, get_current_classloader(thread));
+    if (thread->current_exception) { // e.g. a dynamic constant's bootstrap method failed
+      drop_handle(thread, self->bootstrap_handle);
+      drop_handle(thread, self->invoke_array);
+      ASYNC_RETURN(-1);
+    }
     ReferenceArrayStore(self->invoke_array->obj, self->static_i + 3,
                         get_async_result(resolve_indy_static_argument).obj);
   }

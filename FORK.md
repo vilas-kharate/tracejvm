@@ -66,6 +66,18 @@ THIRD_PARTY_NOTICES.md).
   superinterface methods, the one that is not abstract. Any two different defaults for one method counted as
   ambiguous, so a class extending AbstractCollection and implementing List (javac's own List, which jshell iterates)
   had no `spliterator()`: AbstractMethodError, although List's default is more specific than Collection's. Probe P17.
+- 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
+  `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
+  guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their
+  bootstrap method nor resolved (UNREACHABLE, seen as "Unsupported method handle kind"; checklist A6, probes P8d-e).
+  Resolved as HotSpot does, through `MethodHandleNatives.linkDynamicConstant`, synchronously (they nest).
+- 2026-10-29: `UnixFileSystem.bufferedCopy0` (`Files.copy`; after build 16's statvfs0 the copy reached it: B6b).
+- 2026-10-29: thread states: `Thread.holder.threadStatus` is kept as HotSpot does (start, sleep, park, Object.wait,
+  monitor enter, end), so `Thread.getState()` is right (every thread was NEW) and starting a thread twice throws
+  IllegalThreadStateException. `getStackTrace0` returns the thread's own trace (JDK 23 does not fall back to
+  dumpThreads). Probes P18, P19.
+- 2026-10-29: the checklist pages end a stopped VM's worker (`shiklo/checklist/java-engine.js`): a program that calls
+  System.exit now leaves its VM waiting for ever, and several of them crashed the probe page in build 16's CI run.
 - 2026-10-28: `Thread.dumpThreads` and `Thread.getStackTrace0` (`natives/share/java/lang/Thread.c`; both missing:
   `Thread.getAllStackTraces()` and another thread's `getStackTrace()` threw UnsatisfiedLinkError). The element
   building of `Throwable.fillInStackTrace` is now `make_stack_trace_elements`, which walks any thread's frames.

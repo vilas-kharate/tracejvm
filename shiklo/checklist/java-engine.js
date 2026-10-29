@@ -150,7 +150,10 @@ performance.now = () => origin + now();
         if (code == null) code = res.exitCode;
       } catch (e) {
         if (code == null && !error) error = `The Java runtime stopped (${e && (e._tag || e.message)}${e && e.workerMessage ? `: ${e.workerMessage}` : ""}).`;
-        runner = null;                        // a stopped VM is not reused: the next run starts a new one
+        // A stopped VM is not reused: the next run starts a new one. Its worker is ended, or it stays in memory (a
+        // program that called System.exit waits there for ever; a few of them crashed the page in CI).
+        try { runner.terminate(); } catch { /* already gone */ }
+        runner = null;
       } finally { clearTimeout(timer); }
       return { code, error, files: host.files(), ms: Math.round(performance.now() - t) };
     },

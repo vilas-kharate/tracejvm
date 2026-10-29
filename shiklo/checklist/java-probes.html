@@ -887,6 +887,62 @@ worker interrupted
 0
 </script>
 
+<!-- P19: Thread.getState(). Thread.holder.threadStatus stayed 0, so every thread was NEW (main too) and a second
+     start() of a finished thread passed. -->
+<script type="text/x-java" data-id="P19" data-name="threads: getState through every state, a second start">
+import java.util.concurrent.locks.LockSupport;
+
+public class Main {
+    static final Object lock = new Object();
+
+    static void await(Thread t, Thread.State s) throws InterruptedException {
+        for (int i = 0; i < 300 && t.getState() != s; i++) Thread.sleep(10);
+        System.out.println(t.getName() + " " + t.getState());
+    }
+
+    public static void main(String[] a) throws Exception {
+        System.out.println("main " + Thread.currentThread().getState());
+        Thread sleeper = new Thread(() -> { try { Thread.sleep(5000); } catch (InterruptedException e) { } }, "sleeper");
+        System.out.println("sleeper " + sleeper.getState());
+        sleeper.start();
+        await(sleeper, Thread.State.TIMED_WAITING);
+        Thread waiter = new Thread(() -> { synchronized (lock) { try { lock.wait(); } catch (InterruptedException e) { } } }, "waiter");
+        waiter.start();
+        await(waiter, Thread.State.WAITING);
+        Thread parker = new Thread(LockSupport::park, "parker");
+        parker.start();
+        await(parker, Thread.State.WAITING);
+        Thread blocked;
+        synchronized (lock) {
+            blocked = new Thread(() -> { synchronized (lock) { } }, "blocked");
+            blocked.start();
+            await(blocked, Thread.State.BLOCKED);
+        }
+        blocked.join();
+        System.out.println("blocked " + blocked.getState());
+        sleeper.interrupt();
+        waiter.interrupt();
+        LockSupport.unpark(parker);
+        sleeper.join();
+        waiter.join();
+        parker.join();
+        System.out.println(sleeper.getState() + " " + waiter.getState() + " " + parker.getState());
+        try { sleeper.start(); } catch (IllegalThreadStateException e) { System.out.println("second start: " + e.getClass().getSimpleName()); }
+    }
+}
+</script>
+<script type="text/plain" data-out="P19">
+main RUNNABLE
+sleeper NEW
+sleeper TIMED_WAITING
+waiter WAITING
+parker WAITING
+blocked BLOCKED
+blocked TERMINATED
+TERMINATED TERMINATED TERMINATED
+second start: IllegalThreadStateException
+</script>
+
 <script type="text/x-java" data-id="P13" data-name="bug 13: a server and a client on localhost, then an unreachable address">
 import java.io.*;
 import java.net.*;

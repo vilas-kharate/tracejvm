@@ -106,6 +106,7 @@ DECLARE_ASYNC_NATIVE("java/lang", Object, wait0, "(J)V", locals(u32 hold_count; 
   self->wakeup_info.wakeup_us = timeoutMillis == 0 ? 0 : get_unix_us() + timeoutMillis * 1000;
   self->wakeup_info.monitor_wakeup.monitor = obj; // already handlized
   self->wakeup_info.monitor_wakeup.ready = false;
+  set_thread_status(thread, timeoutMillis == 0 ? THREAD_STATUS_IN_OBJECT_WAIT : THREAD_STATUS_IN_OBJECT_WAIT_TIMED);
   ASYNC_YIELD((void *)&self->wakeup_info);
 
   DEBUG_PEDANTIC_YIELD(self->wakeup_info);
@@ -113,6 +114,7 @@ DECLARE_ASYNC_NATIVE("java/lang", Object, wait0, "(J)V", locals(u32 hold_count; 
   // wake up: re-acquire the monitor
   AWAIT(monitor_reacquire_hold_count, thread, obj->obj, self->hold_count);
   assert(get_async_result(monitor_reacquire_hold_count) == 0);
+  set_thread_status(thread, THREAD_STATUS_RUNNABLE);
 
   if (thread->thread_obj->interrupted) {
     thread->thread_obj->interrupted = false; // throw and reset flag

@@ -240,10 +240,12 @@ DECLARE_ASYNC_NATIVE("jdk/internal/misc", Unsafe, park, "(ZJ)V", locals(rr_wakeu
 
   self->wakeup_info.kind = RR_THREAD_PARK;
   self->wakeup_info.wakeup_us = deadline_us;
+  set_thread_status(thread, deadline_us == 0 ? THREAD_STATUS_PARKED : THREAD_STATUS_PARKED_TIMED);
   ASYNC_YIELD((void *)&self->wakeup_info);
 
   DEBUG_PEDANTIC_YIELD(self->wakeup_info);
   thread->unpark_permit = false; // woken by unpark (or the deadline, or an interrupt): the permit is used up
+  set_thread_status(thread, THREAD_STATUS_RUNNABLE);
 
   ASYNC_END(value_null());
 }

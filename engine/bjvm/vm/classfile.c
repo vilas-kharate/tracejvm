@@ -1626,11 +1626,12 @@ char *parse_method_descriptor(const slice entry, method_descriptor *result, aren
   return error;
 }
 
-// Go through the InvokeDynamic entries and link their bootstrap method pointers
+// Go through the InvokeDynamic and Dynamic entries and link their bootstrap method pointers (Dynamic ones too: Shiklo
+// fork, 2026-10-29; they kept the attribute index, read later as a pointer)
 static void link_bootstrap_methods(classdesc *cf) {
   constant_pool *cp = cf->pool;
   for (int i = 1; i < cp->entries_len; i++) {
-    if (cp->entries[i].kind == CP_KIND_INVOKE_DYNAMIC) {
+    if (cp->entries[i].kind == CP_KIND_INVOKE_DYNAMIC || cp->entries[i].kind == CP_KIND_DYNAMIC_CONSTANT) {
       cp_indy_info *indy = &cp->entries[i].indy_info;
       int index = (int)indy->_method_index;
       attribute *attr = find_attribute_by_kind(cf, ATTRIBUTE_KIND_BOOTSTRAP_METHODS);

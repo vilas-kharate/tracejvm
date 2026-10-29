@@ -234,6 +234,39 @@ DECLARE_NATIVE("sun/nio/fs", UnixNativeDispatcher, statvfs0, "(JLsun/nio/fs/Unix
   return value_null();
 }
 
+// Files.copy of a regular file: LinuxFileSystem.directCopy0 answers "unsupported", so the JDK copies through a
+// temporary direct buffer with this (Shiklo fork, 2026-10-29; it was missing: UnsatisfiedLinkError). Reads src into
+// the buffer and writes it all to dst until the end of src; a non-zero int at addressToPollForCancel stops the copy
+// (UnixException ECANCELED), as in the JDK.
+// int dst, int src, long address, int size, long addressToPollForCancel
+DECLARE_NATIVE("sun/nio/fs", UnixFileSystem, bufferedCopy0, "(IIJIJ)V") {
+  int dst = args[0].i, src = args[1].i;
+  char *buffer = (char *)(uintptr_t)args[2].l;
+  int size = args[3].i;
+  volatile int *cancel = (volatile int *)(uintptr_t)args[4].l;
+  for (;;) {
+    ssize_t count = tracejvm_host_read(src, buffer, (size_t)size, 0, false);
+    if (count < 0) {
+      thread->current_exception = create_unix_exception(thread, errno);
+      return value_null();
+    }
+    if (count == 0)
+      return value_null();
+    for (ssize_t done = 0; done < count;) {
+      ssize_t written = tracejvm_host_write(dst, buffer + done, (size_t)(count - done), 0, false);
+      if (written <= 0) {
+        thread->current_exception = create_unix_exception(thread, written < 0 ? errno : EIO);
+        return value_null();
+      }
+      done += written;
+    }
+    if (cancel && *cancel) {
+      thread->current_exception = create_unix_exception(thread, ECANCELED);
+      return value_null();
+    }
+  }
+}
+
 // DIR *opendir(const char* dirname)
 DECLARE_NATIVE("sun/nio/fs", UnixNativeDispatcher, opendir0, "(J)J") {
   tracejvm_host_dir *dir =

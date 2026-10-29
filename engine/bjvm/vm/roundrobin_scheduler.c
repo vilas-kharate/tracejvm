@@ -66,6 +66,7 @@ void monitor_exit_handler(rr_scheduler *scheduler, obj_header *monitor) {
 void free_thread_info(rr_scheduler *scheduler, thread_info *info) {
   // technically doesn't need to acquire the monitor to notify, since scheduler is god
   info->thread->thread_obj->eetop = 0; // set the eetop to nullptr
+  set_thread_status(info->thread, THREAD_STATUS_TERMINATED);
   monitor_notify_all(scheduler, (obj_header *)info->thread->thread_obj);
 
   arrfree(info->call_queue);
@@ -303,8 +304,10 @@ static thread_info *get_or_create_thread_info(impl *impl, vm_thread *thread) {
   // ended (the main thread runs runCompiled, then takeLastIsolationReport, for every program of a reused VM), so
   // unpark of that thread was dropped and an untimed park (Future.get, Condition.await) never woke (Shiklo fork,
   // 2026-10-28).
-  if (thread->thread_obj)
+  if (thread->thread_obj) {
     thread->thread_obj->eetop = (s64)(uintptr_t)thread;
+    set_thread_status(thread, THREAD_STATUS_RUNNABLE);
+  }
   arrput(impl->round_robin, info);
   return info;
 }

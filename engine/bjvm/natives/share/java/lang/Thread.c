@@ -62,9 +62,11 @@ DECLARE_NATIVE("java/lang", Thread, dumpThreads, "([Ljava/lang/Thread;)[[Ljava/l
   return (stack_value){.obj = traces};
 }
 
-// Thread.asyncGetStackTrace: an empty array makes the JDK ask dumpThreads for this one thread.
+// Thread.asyncGetStackTrace (another thread's getStackTrace): this thread's trace; empty means none (JDK 23 does not
+// fall back to dumpThreads).
 DECLARE_NATIVE("java/lang", Thread, getStackTrace0, "()Ljava/lang/Object;") {
-  return (stack_value){.obj = CreateObjectArray1D(thread, cached_classes(thread->vm)->stack_trace_element, 0)};
+  vm_thread *target = (vm_thread *)((struct native_Thread *)obj->obj)->eetop;
+  return (stack_value){.obj = make_stack_trace_elements(thread, target ? target->stack.top : nullptr)};
 }
 
 DECLARE_NATIVE("java/lang", Thread, setPriority0, "(I)V") { return value_null(); }
@@ -93,6 +95,7 @@ DECLARE_NATIVE("java/lang", Thread, start0, "()V") {
   stack_value argz[1] = {{.obj = obj->obj}};
 
   this_thread->eetop = (intptr_t)wrapped_thread;
+  set_thread_status(wrapped_thread, THREAD_STATUS_RUNNABLE);
   rr_scheduler_run(scheduler, (call_interpreter_t){{wrapped_thread, run, argz}});
 #undef this_thread
 
@@ -140,9 +143,11 @@ DECLARE_ASYNC_NATIVE("java/lang", Thread, sleepNanos0, "(J)V", locals(rr_wakeup_
 
   self->wakeup_info.kind = RR_WAKEUP_SLEEP;
   self->wakeup_info.wakeup_us = end;
+  set_thread_status(thread, THREAD_STATUS_SLEEPING);
   ASYNC_YIELD((void *)&self->wakeup_info);
 
   DEBUG_PEDANTIC_YIELD(self->wakeup_info);
+  set_thread_status(thread, THREAD_STATUS_RUNNABLE);
 
   // re-check interrupt status after wakeup
   if (thread->thread_obj->interrupted) {

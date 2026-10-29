@@ -71,8 +71,10 @@ DEFINE_ASYNC(monitor_acquire) {
     self->wakeup_info.kind = RR_MONITOR_ENTER_WAITING;
     self->wakeup_info.wakeup_us = 0;
     self->wakeup_info.monitor_wakeup.monitor = self->handle;
+    set_thread_status(args->thread, THREAD_STATUS_BLOCKED);
     ASYNC_YIELD((void *)&self->wakeup_info);
     DEBUG_PEDANTIC_YIELD(self->wakeup_info);
+    set_thread_status(args->thread, THREAD_STATUS_RUNNABLE);
   }
 
   // done acquiring the monitor
@@ -118,6 +120,7 @@ DEFINE_ASYNC(monitor_reacquire_hold_count) {
     self->wakeup_info.kind = RR_MONITOR_ENTER_WAITING;
     self->wakeup_info.wakeup_us = 0;
     self->wakeup_info.monitor_wakeup.monitor = self->handle;
+    set_thread_status(args->thread, THREAD_STATUS_BLOCKED); // re-entering after Object.wait
     ASYNC_YIELD((void *)&self->wakeup_info);
     DEBUG_PEDANTIC_YIELD(self->wakeup_info);
   }

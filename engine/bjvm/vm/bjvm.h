@@ -702,6 +702,19 @@ typedef struct vm_thread {
 } vm_thread;
 
 // park/unpark
+// Thread.getState() and Thread.start() read Thread.holder.threadStatus: JVMTI thread state bits, as HotSpot's
+// JavaThreadStatus (Shiklo fork, 2026-10-29; it stayed 0, so every thread was NEW and a second start() passed).
+enum {
+  THREAD_STATUS_RUNNABLE = 0x0005,             // alive, runnable
+  THREAD_STATUS_SLEEPING = 0x00E1,             // alive, waiting with timeout, sleeping
+  THREAD_STATUS_IN_OBJECT_WAIT = 0x0191,       // alive, waiting indefinitely, in Object.wait
+  THREAD_STATUS_IN_OBJECT_WAIT_TIMED = 0x01A1, // alive, waiting with timeout, in Object.wait
+  THREAD_STATUS_PARKED = 0x0291,               // alive, waiting indefinitely, parked
+  THREAD_STATUS_PARKED_TIMED = 0x02A1,         // alive, waiting with timeout, parked
+  THREAD_STATUS_BLOCKED = 0x0401,              // alive, blocked on monitor enter
+  THREAD_STATUS_TERMINATED = 0x0002
+};
+void set_thread_status(vm_thread *thread, s32 status);
 int set_unpark_permit(vm_thread *thread);    // returns -1 if thread not existent somehow (dead reference)
 bool query_unpark_permit(vm_thread *thread); // calling this from the thread itself, so it must be alive
 
