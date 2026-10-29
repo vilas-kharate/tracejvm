@@ -432,3 +432,154 @@ DECLARE_NATIVE("jdk/internal/misc", Unsafe, setMemory0, "(Ljava/lang/Object;JJB)
   memset((void *)((uintptr_t)args[0].handle->obj + args[1].l), args[3].i, args[2].l);
   return value_null();
 }
+
+// The Unsafe natives HotSpot has and this VM lacked (Shiklo fork, 2026-10-29): char and float accessors, the volatile
+// accessors of boolean, byte, char, short, float and double, compareAndExchangeInt, throwException, reallocateMemory0
+// and copySwapMemory0. Reflection on fields of these types (Field.set on a volatile boolean: jshell's execution engine
+// stopped there, so no snippet ran) and VarHandles use them. One thread runs at a time, so a volatile access is a plain
+// one; memcpy, because an off-heap address need not be aligned. A null object means an absolute address.
+#define UNSAFE_AT(offset_arg) ((char *)(uintptr_t)args[0].handle->obj + args[offset_arg].l)
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getChar, "(Ljava/lang/Object;J)C") {
+  u16 v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.i = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putChar, "(Ljava/lang/Object;JC)V") {
+  u16 v = (u16)args[2].i;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getFloat, "(Ljava/lang/Object;J)F") {
+  float v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.f = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putFloat, "(Ljava/lang/Object;JF)V") {
+  float v = args[2].f;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getBooleanVolatile, "(Ljava/lang/Object;J)Z") {
+  u8 v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.i = v != 0};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putBooleanVolatile, "(Ljava/lang/Object;JZ)V") {
+  u8 v = (u8)(args[2].i & 1);
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getByteVolatile, "(Ljava/lang/Object;J)B") {
+  s8 v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.i = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putByteVolatile, "(Ljava/lang/Object;JB)V") {
+  s8 v = (s8)args[2].i;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getCharVolatile, "(Ljava/lang/Object;J)C") {
+  u16 v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.i = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putCharVolatile, "(Ljava/lang/Object;JC)V") {
+  u16 v = (u16)args[2].i;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getShortVolatile, "(Ljava/lang/Object;J)S") {
+  s16 v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.i = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putShortVolatile, "(Ljava/lang/Object;JS)V") {
+  s16 v = (s16)args[2].i;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getFloatVolatile, "(Ljava/lang/Object;J)F") {
+  float v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.f = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putFloatVolatile, "(Ljava/lang/Object;JF)V") {
+  float v = args[2].f;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, getDoubleVolatile, "(Ljava/lang/Object;J)D") {
+  double v;
+  memcpy(&v, UNSAFE_AT(1), sizeof(v));
+  return (stack_value){.d = v};
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, putDoubleVolatile, "(Ljava/lang/Object;JD)V") {
+  double v = args[2].d;
+  memcpy(UNSAFE_AT(1), &v, sizeof(v));
+  return value_null();
+}
+
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, compareAndExchangeInt, "(Ljava/lang/Object;JII)I") {
+  s32 *at = (s32 *)UNSAFE_AT(1);
+  return (stack_value){.i = __sync_val_compare_and_swap(at, args[2].i, args[3].i)};
+}
+
+#undef UNSAFE_AT
+
+// Throws the given throwable, checked or not (Unsafe.throwException).
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, throwException, "(Ljava/lang/Throwable;)V") {
+  if (!args[0].handle->obj)
+    raise_null_pointer_exception(thread);
+  else
+    thread->current_exception = args[0].handle->obj;
+  return value_null();
+}
+
+// long address, long bytes: as realloc, keeping the VM's list of Unsafe allocations (freed at exit) up to date.
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, reallocateMemory0, "(JJ)J") {
+  void *old = (void *)(uintptr_t)args[0].l;
+  void *now = realloc(old, (size_t)args[1].l);
+  if (!now && args[1].l) {
+    raise_vm_exception_no_msg(thread, STR("java/lang/OutOfMemoryError"));
+    return (stack_value){.l = 0};
+  }
+  if (old)
+    remove_unsafe_allocation(thread->vm, old);
+  if (now)
+    arrput(thread->vm->unsafe_allocations, now);
+  return (stack_value){.l = (s64)(uintptr_t)now};
+}
+
+// Object srcBase, long srcOffset, Object destBase, long destOffset, long bytes, long elemSize: copies elements of
+// elemSize bytes (2, 4 or 8), reversing the byte order of each (ByteBuffer with the other byte order).
+DECLARE_NATIVE("jdk/internal/misc", Unsafe, copySwapMemory0, "(Ljava/lang/Object;JLjava/lang/Object;JJJ)V") {
+  u8 *src = (u8 *)(uintptr_t)args[0].handle->obj + args[1].l;
+  u8 *dst = (u8 *)(uintptr_t)args[2].handle->obj + args[3].l;
+  s64 bytes = args[4].l, size = args[5].l;
+  if (size < 1 || size > 8)
+    return value_null();
+  u8 element[8];
+  for (s64 at = 0; at + size <= bytes; at += size) {
+    for (s64 k = 0; k < size; ++k)
+      element[k] = src[at + size - 1 - k];
+    memcpy(dst + at, element, (size_t)size);
+  }
+  return value_null();
+}

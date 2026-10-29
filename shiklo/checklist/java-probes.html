@@ -943,6 +943,101 @@ TERMINATED TERMINATED TERMINATED
 second start: IllegalThreadStateException
 </script>
 
+<!-- P20: the Unsafe accessors reflection and VarHandles use. char / float and the volatile forms of boolean, byte,
+     char, short, float, double, compareAndExchangeInt and copySwapMemory0 were missing (UnsatisfiedLinkError: Field.set
+     on a volatile boolean; jshell ran no snippet because of it). -->
+<script type="text/x-java" data-id="P20" data-name="Unsafe: reflection and VarHandles on every primitive type, byte-order copies">
+import java.lang.invoke.*;
+import java.lang.reflect.Field;
+import java.nio.*;
+import java.util.Arrays;
+
+public class Main {
+    static volatile boolean flag;
+    static volatile byte b;
+    static volatile char c;
+    static volatile short s;
+    static volatile float f;
+    static volatile double d;
+    char plainC;
+    float plainF;
+    volatile int count;
+
+    public static void main(String[] a) throws Exception {
+        java.util.StringJoiner line = new java.util.StringJoiner(" ");
+        for (String name : new String[] { "flag", "b", "c", "s", "f", "d" }) {
+            Field field = Main.class.getDeclaredField(name);
+            Object value = switch (name) {
+                case "flag" -> true; case "b" -> (byte) 7; case "c" -> 'J'; case "s" -> (short) -3; case "f" -> 1.5f; default -> 2.25;
+            };
+            field.set(null, value);
+            line.add(name + "=" + field.get(null));
+        }
+        System.out.println(line);
+        Main m = new Main();
+        MethodHandles.Lookup l = MethodHandles.lookup();
+        VarHandle vc = l.findVarHandle(Main.class, "plainC", char.class);
+        VarHandle vf = l.findVarHandle(Main.class, "plainF", float.class);
+        VarHandle vi = l.findVarHandle(Main.class, "count", int.class);
+        vc.setVolatile(m, 'x');
+        vf.setOpaque(m, 3.5f);
+        System.out.println(vc.getVolatile(m) + " " + vf.getAcquire(m) + " " + (int) vi.compareAndExchange(m, 0, 5) + " " + (int) vi.compareAndExchange(m, 0, 9) + " " + m.count);
+        VarHandle vb = l.findStaticVarHandle(Main.class, "flag", boolean.class);
+        System.out.println(vb.compareAndSet(true, false) + " " + flag);
+        ByteBuffer bb = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+        bb.asIntBuffer().put(new int[] { 1, 0x01020304 });
+        System.out.println(Arrays.toString(Arrays.copyOf(bb.array(), 8)));
+        int[] back = new int[2];
+        bb.order(ByteOrder.BIG_ENDIAN).asIntBuffer().get(back);
+        System.out.println(Integer.toHexString(back[0]) + " " + Integer.toHexString(back[1]));
+        ByteBuffer direct = ByteBuffer.allocateDirect(8).order(ByteOrder.LITTLE_ENDIAN);
+        direct.asCharBuffer().put("hi");
+        direct.asShortBuffer().get(0);
+        System.out.println(direct.getChar(0) + "" + direct.getChar(2) + " " + direct.order(ByteOrder.BIG_ENDIAN).getShort(0));
+    }
+}
+</script>
+<script type="text/plain" data-out="P20">
+flag=true b=7 c=J s=-3 f=1.5 d=2.25
+x 3.5 0 5 5
+true false
+[1, 0, 0, 0, 4, 3, 2, 1]
+1000000 4030201
+hi 26624
+</script>
+
+<!-- P21: thread groups. The main thread was in the top-level "system" group itself; HotSpot puts it in "main". -->
+<script type="text/x-java" data-id="P21" data-name="threads: groups (main in system), a group of workers">
+import java.util.concurrent.CountDownLatch;
+
+public class Main {
+    public static void main(String[] a) throws Exception {
+        ThreadGroup main = Thread.currentThread().getThreadGroup();
+        System.out.println(main.getName() + " in " + main.getParent().getName() + ", top " + (main.getParent().getParent() == null));
+        CountDownLatch go = new CountDownLatch(1);
+        ThreadGroup workers = new ThreadGroup("workers");
+        Thread[] started = new Thread[2];
+        for (int i = 0; i < 2; i++) {
+            started[i] = new Thread(workers, () -> { try { go.await(); } catch (InterruptedException e) { } }, "w" + i);
+            started[i].start();
+        }
+        System.out.println(workers.getParent().getName() + " " + workers.activeCount() + " " + started[0].getThreadGroup().getName());
+        Thread[] list = new Thread[4];
+        int n = workers.enumerate(list);
+        System.out.println(n + " " + list[0].getName() + " " + list[1].getName());
+        go.countDown();
+        for (Thread t : started) t.join();
+        System.out.println(workers.activeCount() + " " + started[0].getThreadGroup());
+    }
+}
+</script>
+<script type="text/plain" data-out="P21">
+main in system, top true
+main 2 workers
+2 w0 w1
+0 null
+</script>
+
 <script type="text/x-java" data-id="P13" data-name="bug 13: a server and a client on localhost, then an unreachable address">
 import java.io.*;
 import java.net.*;

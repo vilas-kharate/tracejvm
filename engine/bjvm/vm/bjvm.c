@@ -2877,18 +2877,27 @@ int get_line_number(const attribute_code *code, u16 pc) {
   return -1;
 }
 
+// As HotSpot: the top-level "system" group, and in it the "main" group, where the main thread runs (Shiklo fork,
+// 2026-10-29: the main thread was in "system" itself, so its getThreadGroup().getName() said system).
 obj_header *get_main_thread_group(vm_thread *thread) {
   vm *vm = thread->vm;
   if (!vm->main_thread_group) {
     classdesc *ThreadGroup = cached_classes(vm)->thread_group;
-    cp_method *init = method_lookup(ThreadGroup, STR("<init>"), STR("()V"), false, false);
+    cp_method *system_init = method_lookup(ThreadGroup, STR("<init>"), STR("()V"), false, false);
+    cp_method *child_init =
+        method_lookup(ThreadGroup, STR("<init>"), STR("(Ljava/lang/ThreadGroup;Ljava/lang/String;)V"), false, false);
+    DCHECK(system_init && child_init);
 
-    DCHECK(init);
-
-    obj_header *thread_group = new_object(thread, ThreadGroup);
-    vm->main_thread_group = thread_group;
-    stack_value args[1] = {(stack_value){.obj = thread_group}};
-    call_interpreter_synchronous(thread, init, args); // ThreadGroup constructor doesn't do much
+    handle *system = make_handle(thread, new_object(thread, ThreadGroup));
+    call_interpreter_synchronous(thread, system_init, (stack_value[]){{.obj = system->obj}});
+    handle *name = make_handle(thread, MakeJStringFromCString(thread, "main", true));
+    handle *main_group = make_handle(thread, new_object(thread, ThreadGroup));
+    stack_value args[3] = {{.obj = main_group->obj}, {.obj = system->obj}, {.obj = name->obj}};
+    call_interpreter_synchronous(thread, child_init, args);
+    vm->main_thread_group = main_group->obj;
+    drop_handle(thread, main_group);
+    drop_handle(thread, name);
+    drop_handle(thread, system);
   }
   return vm->main_thread_group;
 }

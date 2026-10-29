@@ -237,6 +237,32 @@ PYTHON
   fi
 done
 
+# JDK tools for the Shiklo Java page's terminal (Shiklo fork, 2026-10-29): javap, jar and jshell run on the VM from
+# class-path jars made from this JDK's own jmods, which the page loads only when a tool is typed. jdk-tools.jar holds
+# jar, javap and javac's API (javax.tools, with a ToolProvider that finds tools on a class path); jdk-jshell.jar holds
+# jshell and what it needs besides (line editing, JDI, markdown doc comments). java.prefs is not included: a class-path
+# class cannot be in a java.* package; the page gives jshell its settings in memory instead.
+tools_root="$runtime_root/tools"
+tool_provider_root="$build_root/tool-provider"
+rm -rf "$tools_root" "$tool_provider_root"
+mkdir -p "$tools_root" "$tool_provider_root"
+javac \
+  --patch-module "java.compiler=$repo_root/shiklo/tools/src" \
+  -d "$tool_provider_root" \
+  "$repo_root/shiklo/tools/src/javax/tools/ToolProvider.java"
+java "$repo_root/shiklo/tools/MakeToolJar.java" "$tools_root/jdk-tools.jar" "$tool_provider_root" \
+  "$linux_home/jmods/java.compiler.jmod" \
+  "$linux_home/jmods/jdk.internal.opt.jmod" \
+  "$linux_home/jmods/jdk.compiler.jmod" \
+  "$linux_home/jmods/jdk.jartool.jmod" \
+  "$linux_home/jmods/jdk.jdeps.jmod"
+java "$repo_root/shiklo/tools/MakeToolJar.java" "$tools_root/jdk-jshell.jar" - \
+  "$linux_home/jmods/jdk.jshell.jmod" \
+  "$linux_home/jmods/jdk.internal.le.jmod" \
+  "$linux_home/jmods/jdk.internal.ed.jmod" \
+  "$linux_home/jmods/jdk.internal.md.jmod" \
+  "$linux_home/jmods/jdk.jdi.jmod"
+
 hot_aot_generator_root="$build_root/hot-aot-generator"
 mkdir -p "$hot_aot_generator_root"
 javac \

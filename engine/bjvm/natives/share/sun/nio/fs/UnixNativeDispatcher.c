@@ -101,11 +101,13 @@ static obj_header *create_unix_exception_message(vm_thread *thread, char const *
   return obj;
 }
 
-static obj_header *create_unix_path_exception(vm_thread *thread, char const *operation,
-                                              char const *path, int errno_code) {
-  char message[PATH_MAX + 128];
-  snprintf(message, sizeof(message), "%s(%s): %s", operation, path, strerror(errno_code));
-  return create_unix_exception_message(thread, message);
+// A failed operation on a path. The exception carries the error number, as the JDK's own natives do: the JDK chooses
+// NoSuchFileException, FileAlreadyExistsException, DirectoryNotEmptyException, AccessDeniedException … from it and
+// adds the path itself (Shiklo fork, 2026-10-29: it carried only a message like "rmdir(data): Directory not empty", so
+// every such error was a plain IOException).
+static obj_header *create_unix_path_exception(vm_thread *thread, [[maybe_unused]] char const *operation,
+                                              [[maybe_unused]] char const *path, int errno_code) {
+  return create_unix_exception(thread, errno_code);
 }
 
 DECLARE_NATIVE("sun/nio/fs", UnixNativeDispatcher, init, "()I") { return value_null(); }

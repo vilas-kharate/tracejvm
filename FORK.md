@@ -66,6 +66,22 @@ THIRD_PARTY_NOTICES.md).
   superinterface methods, the one that is not abstract. Any two different defaults for one method counted as
   ambiguous, so a class extending AbstractCollection and implementing List (javac's own List, which jshell iterates)
   had no `spliterator()`: AbstractMethodError, although List's default is more specific than Collection's. Probe P17.
+- 2026-10-29 (after build 17: checklist 37/38, probes 35/35): JDK tools for the Shiklo Java page's terminal. The
+  release carries `tools/jdk-tools.jar` (jar, javap, javac's API) and `tools/jdk-jshell.jar` (jshell, line editing,
+  JDI, markdown doc comments), class-path jars made from this JDK's jmods by `shiklo/tools/MakeToolJar.java`
+  (`build-runtime.sh`): each module's `provides` as META-INF/services, and `shiklo/tools/src/javax/tools/ToolProvider`
+  in place of the JDK's, which takes tools only from the jdk.compiler module. Reproducible (fixed entry times). On
+  build 17 javap and jar work as on a desktop JDK; jshell started, compiled, and ran no snippet (next item).
+- 2026-10-29: the Unsafe natives HotSpot has and the VM lacked (`natives/share/jdk/internal/misc/Unsafe.c`): char and
+  float accessors, the volatile accessors of boolean, byte, char, short, float and double, compareAndExchangeInt,
+  throwException, reallocateMemory0, copySwapMemory0. `Field.set` on a volatile boolean threw UnsatisfiedLinkError
+  (jshell sets one before every snippet, and reported nothing), as did VarHandles on such fields and byte-order
+  bulk copies of buffers. Probe P20.
+- 2026-10-29: a failed file operation's UnixException carries its error number (`UnixNativeDispatcher.c`), so the JDK
+  throws DirectoryNotEmptyException, NoSuchFileException, FileAlreadyExistsException … (it carried only a message, and
+  every such error was a plain IOException: checklist B6b on build 17).
+- 2026-10-29: the main thread runs in a "main" thread group inside "system", as in HotSpot (it was in "system").
+  Probe P21.
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their
