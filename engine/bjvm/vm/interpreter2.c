@@ -1926,6 +1926,29 @@ static int intrinsify(vm_thread *thread, bytecode_insn *inst) {
     }
     return 1;
   }
+  // Sorting in C (Shiklo fork, 2026-10-30): Arrays.sort, Collections.sort and List.sort took seconds for a few
+  // hundred thousand elements (sort_primitive_impl_void, sort_objects_impl_void below).
+  if (utf8_equals(method->name, "sort")) {
+    slice desc = method->unparsed_descriptor;
+    if (utf8_equals(method->my_class->name, "java/util/DualPivotQuicksort") &&
+        (utf8_equals(desc, "([IIII)V") || utf8_equals(desc, "([JIII)V") || utf8_equals(desc, "([FIII)V") ||
+         utf8_equals(desc, "([DIII)V") || utf8_equals(desc, "([BII)V") || utf8_equals(desc, "([CII)V") ||
+         utf8_equals(desc, "([SII)V"))) {
+      inst->kind = insn_sort_primitive;
+      return 1;
+    }
+    if (utf8_equals(method->my_class->name, "java/util/ComparableTimSort") &&
+        utf8_equals(desc, "([Ljava/lang/Object;II[Ljava/lang/Object;II)V")) {
+      inst->kind = insn_sort_comparable;
+      return 1;
+    }
+    if (utf8_equals(method->my_class->name, "java/util/TimSort") &&
+        utf8_equals(desc, "([Ljava/lang/Object;IILjava/util/Comparator;[Ljava/lang/Object;II)V")) {
+      inst->kind = insn_sort_comparator;
+      return 1;
+    }
+    return 0;
+  }
   if (thread->vm->experimental_hot_intrinsics) {
     switch (identify_hot_intrinsic(method)) {
     case HOT_INTRINSIC_ARRAYS_SUPPORT_UNSIGNED_HASH_CODE:
@@ -3104,6 +3127,219 @@ static s64 bigint_square_to_len_impl_void(ARGS_VOID) {
 }
 FORWARD_TO_NULLARY(bigint_square_to_len)
 
+// ---- Sorting (Shiklo fork, 2026-10-30). The orders are the Java code's: primitives ascending with -0.0 before 0.0 and
+// NaN last (Double.compare), objects by compareTo and stable, as TimSort. When the arguments are not ones handled here
+// (a range the Java code would reject, null or mixed elements, another comparator), the Java method runs instead.
+
+#define SORT_COMPARE(name, T)                                                                                          \
+  static int name(const void *x, const void *y) {                                                                      \
+    T a = *(const T *)x, b = *(const T *)y;                                                                            \
+    return (a > b) - (a < b);                                                                                          \
+  }
+SORT_COMPARE(sort_compare_byte, s8)
+SORT_COMPARE(sort_compare_char, u16)
+SORT_COMPARE(sort_compare_short, s16)
+SORT_COMPARE(sort_compare_int, s32)
+SORT_COMPARE(sort_compare_long, s64)
+#undef SORT_COMPARE
+
+static int sort_compare_doubles(double a, double b) {
+  if (a < b)
+    return -1;
+  if (a > b)
+    return 1;
+  bool a_nan = a != a, b_nan = b != b;
+  if (a_nan || b_nan)
+    return a_nan - b_nan;
+  return (signbit(b) != 0) - (signbit(a) != 0); // equal: -0.0 first
+}
+static int sort_compare_float(const void *x, const void *y) {
+  return sort_compare_doubles(*(const float *)x, *(const float *)y);
+}
+static int sort_compare_double(const void *x, const void *y) {
+  return sort_compare_doubles(*(const double *)x, *(const double *)y);
+}
+
+// void DualPivotQuicksort.sort(int[] a, int parallelism, int low, int high), the same for long[], float[] and double[];
+// sort(byte[] a, int low, int high), the same for char[] and short[].
+static s64 sort_primitive_impl_void(ARGS_VOID) {
+  DEBUG_CHECK();
+  int argc = insn->args;
+  stack_value *args = sp - argc;
+  obj_header *array = args[0].obj;
+  s32 low = args[argc - 2].i, high = args[argc - 1].i;
+  if (unlikely(!array || low < 0 || low > high || high > ArrayLength(array))) {
+    MUSTTAIL return invokestatic_resolved_impl_void(thread, frame, insns_, fuel_, sp_, arg_1, arg_2, arg_3);
+  }
+  size_t size;
+  int (*compare)(const void *, const void *);
+  switch (((cp_method *)insn->ic)->unparsed_descriptor.chars[2]) {
+  case 'B':
+    size = 1, compare = sort_compare_byte;
+    break;
+  case 'C':
+    size = 2, compare = sort_compare_char;
+    break;
+  case 'S':
+    size = 2, compare = sort_compare_short;
+    break;
+  case 'I':
+    size = 4, compare = sort_compare_int;
+    break;
+  case 'J':
+    size = 8, compare = sort_compare_long;
+    break;
+  case 'F':
+    size = 4, compare = sort_compare_float;
+    break;
+  default:
+    size = 8, compare = sort_compare_double;
+    break;
+  }
+  qsort((char *)ArrayData(array) + (size_t)low * size, high - low, size, compare);
+  sp -= argc;
+  STACK_POLYMORPHIC_NEXT(*(sp - 1));
+}
+FORWARD_TO_NULLARY(sort_primitive)
+
+// An element and its key: an Integer's or a Long's value, or a String's characters.
+typedef struct {
+  obj_header *obj;
+  union {
+    s64 value;
+    struct {
+      const void *chars;
+      s32 length;
+      s32 coder; // 0 Latin-1 bytes, 1 UTF-16 chars
+    } text;
+  };
+} sort_entry;
+
+static int sort_compare_values(const sort_entry *x, const sort_entry *y) {
+  return (x->value > y->value) - (x->value < y->value);
+}
+
+// String.compareTo's sign.
+static int sort_compare_strings(const sort_entry *x, const sort_entry *y) {
+  s32 n = x->text.length < y->text.length ? x->text.length : y->text.length;
+  if (!x->text.coder && !y->text.coder) {
+    int c = memcmp(x->text.chars, y->text.chars, n);
+    if (c)
+      return c;
+  } else {
+    for (s32 i = 0; i < n; i++) {
+      int a = x->text.coder ? ((const u16 *)x->text.chars)[i] : ((const u8 *)x->text.chars)[i];
+      int b = y->text.coder ? ((const u16 *)y->text.chars)[i] : ((const u8 *)y->text.chars)[i];
+      if (a != b)
+        return a - b;
+    }
+  }
+  return x->text.length - y->text.length;
+}
+
+// A stable merge sort of a[0, n) (tmp has room for n more); sign -1 reverses the order (Collections.reverseOrder()).
+static void sort_entries(sort_entry *a, sort_entry *tmp, s64 n, int (*compare)(const sort_entry *, const sort_entry *),
+                         int sign) {
+  const s64 run = 16;
+  for (s64 lo = 0; lo < n; lo += run) { // insertion sort of short runs
+    s64 hi = lo + run < n ? lo + run : n;
+    for (s64 i = lo + 1; i < hi; i++) {
+      sort_entry e = a[i];
+      s64 j = i;
+      for (; j > lo && sign * compare(&a[j - 1], &e) > 0; j--)
+        a[j] = a[j - 1];
+      a[j] = e;
+    }
+  }
+  sort_entry *from = a, *to = tmp;
+  for (s64 width = run; width < n; width *= 2) {
+    for (s64 lo = 0; lo < n; lo += 2 * width) {
+      s64 mid = lo + width < n ? lo + width : n, hi = lo + 2 * width < n ? lo + 2 * width : n;
+      s64 i = lo, j = mid, k = lo;
+      while (i < mid && j < hi)
+        to[k++] = sign * compare(&from[j], &from[i]) < 0 ? from[j++] : from[i++];
+      while (i < mid)
+        to[k++] = from[i++];
+      while (j < hi)
+        to[k++] = from[j++];
+    }
+    sort_entry *t = from;
+    from = to;
+    to = t;
+  }
+  if (from != a)
+    memcpy(a, from, (size_t)n * sizeof(sort_entry));
+}
+
+// Sorts array[lo, hi) when its elements are all Integers, all Longs or all Strings; false, the array untouched, for
+// anything else. Nothing here allocates on the Java heap, so no collection moves the objects meanwhile.
+static bool sort_objects(vm_thread *thread, obj_header *array, s32 lo, s32 hi, int sign) {
+  if (!array || lo < 0 || lo > hi || hi > ArrayLength(array))
+    return false;
+  s32 n = hi - lo;
+  obj_header **data = (obj_header **)ArrayData(array) + lo;
+  if (n < 2)
+    return true;
+  if (!data[0])
+    return false;
+  classdesc *cd = data[0]->descriptor;
+  struct cached_classdescs *classes = cached_classes(thread->vm);
+  bool is_string = cd == classes->string;
+  if (!is_string && cd != classes->integer && cd != classes->long_)
+    return false;
+  for (s32 i = 1; i < n; i++)
+    if (!data[i] || data[i]->descriptor != cd)
+      return false;
+  cp_field *value = is_string ? nullptr : field_lookup(cd, STR("value"), cd == classes->integer ? STR("I") : STR("J"));
+  if (!is_string && !value)
+    return false;
+  sort_entry *entries = malloc(2 * (size_t)n * sizeof(sort_entry));
+  if (!entries)
+    return false;
+  for (s32 i = 0; i < n; i++) {
+    sort_entry *e = &entries[i];
+    e->obj = data[i];
+    if (is_string) {
+      struct native_String *s = (struct native_String *)data[i];
+      e->text.chars = ArrayData(s->value);
+      e->text.coder = s->coder;
+      e->text.length = ArrayLength(s->value) >> (s->coder ? 1 : 0);
+    } else if (cd == classes->integer) {
+      e->value = *(s32 *)((char *)data[i] + value->byte_offset);
+    } else {
+      e->value = *(s64 *)((char *)data[i] + value->byte_offset);
+    }
+  }
+  sort_entries(entries, entries + n, n, is_string ? sort_compare_strings : sort_compare_values, sign);
+  for (s32 i = 0; i < n; i++)
+    data[i] = entries[i].obj;
+  free(entries);
+  return true;
+}
+
+// void ComparableTimSort.sort(Object[] a, int lo, int hi, Object[] work, int workBase, int workLen), and
+// void TimSort.sort(T[] a, int lo, int hi, Comparator c, T[] work, int workBase, int workLen) with
+// Comparator.naturalOrder() or reverseOrder().
+static s64 sort_objects_impl_void(ARGS_VOID) {
+  DEBUG_CHECK();
+  int argc = insn->args;
+  stack_value *args = sp - argc;
+  int sign = 1;
+  if (insn->kind == insn_sort_comparator) {
+    obj_header *c = args[3].obj;
+    if (c && utf8_equals(c->descriptor->name, "java/util/Collections$ReverseComparator"))
+      sign = -1;
+    else if (!c || !utf8_equals(c->descriptor->name, "java/util/Comparators$NaturalOrderComparator"))
+      sign = 0;
+  }
+  if (!sign || !sort_objects(thread, args[0].obj, args[1].i, args[2].i, sign)) {
+    MUSTTAIL return invokestatic_resolved_impl_void(thread, frame, insns_, fuel_, sp_, arg_1, arg_2, arg_3);
+  }
+  sp -= argc;
+  STACK_POLYMORPHIC_NEXT(*(sp - 1));
+}
+FORWARD_TO_NULLARY(sort_objects)
+
 static s64 pow_impl_double(ARGS_DOUBLE) {
   DEBUG_CHECK();
   double result = pow((sp - 2)->d, tos);
@@ -3689,6 +3925,9 @@ PAGE_ALIGN static s64 (*jmp_table_void[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_bigint_mul_add] = bigint_mul_add_impl_void,
     [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_void,
     [insn_bigint_square_to_len] = bigint_square_to_len_impl_void,
+    [insn_sort_primitive] = sort_primitive_impl_void,
+    [insn_sort_comparable] = sort_objects_impl_void,
+    [insn_sort_comparator] = sort_objects_impl_void,
 };
 
 PAGE_ALIGN static s64 (*jmp_table_double[MAX_INSN_KIND])(ARGS_VOID) = {
@@ -3772,7 +4011,10 @@ PAGE_ALIGN static s64 (*jmp_table_double[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_double,
     [insn_bigint_mul_add] = bigint_mul_add_impl_double,
     [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_double,
-    [insn_bigint_square_to_len] = bigint_square_to_len_impl_double};
+    [insn_bigint_square_to_len] = bigint_square_to_len_impl_double,
+    [insn_sort_primitive] = sort_primitive_impl_double,
+    [insn_sort_comparable] = sort_objects_impl_double,
+    [insn_sort_comparator] = sort_objects_impl_double};
 
 PAGE_ALIGN static s64 (*jmp_table_int[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_nop] = nop_impl_int,
@@ -3940,6 +4182,9 @@ PAGE_ALIGN static s64 (*jmp_table_int[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_bigint_mul_add] = bigint_mul_add_impl_int,
     [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_int,
     [insn_bigint_square_to_len] = bigint_square_to_len_impl_int,
+    [insn_sort_primitive] = sort_primitive_impl_int,
+    [insn_sort_comparable] = sort_objects_impl_int,
+    [insn_sort_comparator] = sort_objects_impl_int,
 };
 
 PAGE_ALIGN static s64 (*jmp_table_float[MAX_INSN_KIND])(ARGS_VOID) = {
@@ -4020,4 +4265,7 @@ PAGE_ALIGN static s64 (*jmp_table_float[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_float,
     [insn_bigint_mul_add] = bigint_mul_add_impl_float,
     [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_float,
-    [insn_bigint_square_to_len] = bigint_square_to_len_impl_float};
+    [insn_bigint_square_to_len] = bigint_square_to_len_impl_float,
+    [insn_sort_primitive] = sort_primitive_impl_float,
+    [insn_sort_comparable] = sort_objects_impl_float,
+    [insn_sort_comparator] = sort_objects_impl_float};

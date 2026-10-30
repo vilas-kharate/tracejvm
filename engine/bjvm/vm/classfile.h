@@ -269,6 +269,9 @@ typedef enum : u8 {
   insn_bigint_mul_add, // BigInteger.implMulAdd ([I[IIII)I (Shiklo fork, 2026-10-30)
   insn_bigint_multiply_to_len, // BigInteger.implMultiplyToLen ([II[II[I)[I
   insn_bigint_square_to_len, // BigInteger.implSquareToLen ([II[II)[I
+  insn_sort_primitive, // DualPivotQuicksort.sort of a primitive array, ([IIII)V to ([BII)V (Shiklo fork, 2026-10-30)
+  insn_sort_comparable, // ComparableTimSort.sort ([Ljava/lang/Object;II[Ljava/lang/Object;II)V
+  insn_sort_comparator, // TimSort.sort ([Ljava/lang/Object;IILjava/util/Comparator;[Ljava/lang/Object;II)V
 
   /** default-off Java-library hot-path experiment */
   insn_hot_aot, // generated build-time AOT for a resolved static call

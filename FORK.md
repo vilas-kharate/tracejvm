@@ -147,6 +147,15 @@ THIRD_PARTY_NOTICES.md).
   or socket).
 - 2026-10-30: the spring-server image adds `java.prefs` and `java.datatransfer` (`java.util.prefs` and the AWT
   clipboard types; javac's descriptor lacked them).
+- 2026-10-30 (after build 22): `Reflection.getCallerClass` skips the frames HotSpot skips (`Method.invoke`, the
+  reflection accessors, LambdaForms, MethodHandle intrinsics) instead of every `java.lang.invoke` class
+  (`natives/share/jdk/internal/reflect/Reflection.c`): `MethodHandles.lookup()` inside `LazyInitializingVarHandle`
+  got its caller's lookup, so `SSLContext.getDefault()`, and with it every `HttpClient`, failed with InternalError
+  "uncaught exception".
+- 2026-10-30: sorting as interpreter intrinsics (`vm/interpreter2.c`): `DualPivotQuicksort.sort` of each primitive
+  array type (Java's order: -0.0 before 0.0, NaN last), and `ComparableTimSort.sort` / `TimSort.sort` with natural or
+  reverse order when every element is an Integer, a Long or a String (a stable merge sort, as TimSort); any other
+  call runs the Java code. Sorting 300,000 Integers took 3 s, 300,000 ints 1.4 s.
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their
