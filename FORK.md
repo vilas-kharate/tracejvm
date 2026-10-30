@@ -156,6 +156,17 @@ THIRD_PARTY_NOTICES.md).
   array type (Java's order: -0.0 before 0.0, NaN last), and `ComparableTimSort.sort` / `TimSort.sort` with natural or
   reverse order when every element is an Integer, a Long or a String (a stable merge sort, as TimSort); any other
   call runs the Java code. Sorting 300,000 Integers took 3 s, 300,000 ints 1.4 s.
+- 2026-10-31 (after build 24): helpful NullPointerExceptions number a static method's parameters from 1, and find a
+  parameter's name in the LocalVariableTable by its slot (`vm/extended_npe_message.c`; the analysis records the
+  parameter's number, which was read as a slot: "<parameter2>" for a static method's first).
+- 2026-10-31: `SocketDispatcher.writev0`, a gathering write (`natives/share/sun/nio/ch/Net.c`): HttpClient's requests.
+- 2026-10-31: a `static native void initIDs()` with no native of its own does nothing (`vm/bjvm.c` `define_class`):
+  it only caches JNI IDs, and java.awt's Toolkit, ColorModel, Raster, BufferedImage … failed in their static
+  initializers. `java.util.prefs.FileSystemPreferences`' chmod and file locks
+  (`natives/share/java/util/prefs/FileSystemPreferences.c`, new).
+- 2026-10-31: javac's diagnostics are formatted with `format`, not `formatMessage` (patch 0005), with javac's basic
+  formatter set to "%L%m" and no source line: each starts afresh (the type variables of the one before showed as
+  "ArrayList<E#2>") and keeps its "where E is a type-variable" clauses.
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their

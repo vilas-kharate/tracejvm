@@ -1429,6 +1429,10 @@ classdesc *define_bootstrap_class(vm_thread *thread, slice chars, const u8 *clas
   return define_class(thread, thread->vm->bootstrap_classloader, chars, classfile_bytes, classfile_len);
 }
 
+// The native of an initIDs() that has none (see define_class).
+static stack_value init_ids_noop(vm_thread *, handle *, value *, u8) { return value_null(); }
+static native_callback init_ids_native = {.async_ctx_bytes = 0, .sync = init_ids_noop};
+
 int check_permitted_subclasses(vm_thread *thread, slice name, cp_class_info *super_class) {
   attribute *attr = find_attribute_by_kind(super_class->classdesc, ATTRIBUTE_KIND_PERMITTED_SUBCLASSES);
   if (attr) {
@@ -1550,6 +1554,15 @@ classdesc *define_class(vm_thread *thread, classloader *cl, slice chars, const u
       //      printf("Failed to bind method %.*s on class %.*s\n", fmt_slice(entry->name), fmt_slice(chars));
     done:
     }
+  }
+  // A JDK class's "private static native void initIDs()" only caches JNI field and method IDs for its other natives,
+  // which this VM does not use: one with no native of its own does nothing (Shiklo fork, 2026-10-30; java.awt's
+  // Toolkit, Color, ColorModel, Raster, BufferedImage … threw UnsatisfiedLinkError from their static initializers).
+  for (int j = 0; j < class->methods_count; ++j) {
+    cp_method *method = class->methods + j;
+    if (!method->native_handle && (method->access_flags & ACCESS_NATIVE) && (method->access_flags & ACCESS_STATIC) &&
+        utf8_equals(method->name, "initIDs") && utf8_equals(method->unparsed_descriptor, "()V"))
+      method->native_handle = &init_ids_native;
   }
 
   class->kind = CD_KIND_ORDINARY;

@@ -538,6 +538,40 @@ DECLARE_NATIVE("sun/nio/ch", SocketDispatcher, write0,
   return (stack_value){.i = (int)result};
 }
 
+// A gathering write (Shiklo fork, 2026-10-30; HttpClient's requests failed with UnsatisfiedLinkError): the buffers
+// one after another until one is not written whole. address holds len entries laid out as IOVecWrapper writes them,
+// a base and a length of Unsafe.addressSize bytes each.
+typedef struct {
+  void const *base;
+  size_t length;
+} jdk_iovec;
+
+DECLARE_NATIVE("sun/nio/ch", SocketDispatcher, writev0,
+               "(Ljava/io/FileDescriptor;JI)J") {
+  int fd = file_descriptor_value(args[0].handle);
+  jdk_iovec const *buffers = (jdk_iovec const *)args[1].l;
+  s64 total = 0;
+  for (int i = 0; i < args[2].i; ++i) {
+    if (buffers[i].length == 0)
+      continue;
+    ssize_t result = fd < 0
+        ? -1
+        : tracejvm_host_write(fd, buffers[i].base, buffers[i].length, 0, false);
+    if (result < 0) {
+      if (total > 0)
+        break;
+      if (errno == EAGAIN)
+        return (stack_value){.l = JDK_IOS_UNAVAILABLE};
+      raise_socket_exception(thread, "write", fd < 0 ? EBADF : errno);
+      return value_null();
+    }
+    total += result;
+    if ((size_t)result < buffers[i].length)
+      break;
+  }
+  return (stack_value){.l = total};
+}
+
 DECLARE_NATIVE("sun/nio/ch", UnixDispatcher, init, "()V") {
   return value_null();
 }

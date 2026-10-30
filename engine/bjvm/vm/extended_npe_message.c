@@ -56,16 +56,17 @@ static int extended_npe_phase2(const cp_method *method, stack_variable_source *s
     if (source->index == 0 && !(method->access_flags & ACCESS_STATIC)) {
       string_builder_append(builder, "this");
     } else {
-      if (lvt && ((ent = local_variable_table_lookup(source->index, original_pc, lvt)))) {
+      // source->index is the parameter's number, from 1 (analysis.c's parameter_source); its local slot counts 'this'
+      // and two slots for a long or double. Read as a slot, a static method's first parameter showed as <parameter2>.
+      int slot = method->access_flags & ACCESS_STATIC ? 0 : 1;
+      for (int i = 0; method->descriptor && i < method->descriptor->args_count && i < source->index - 1; ++i) {
+        field_descriptor *arg = method->descriptor->args + i;
+        slot += !arg->dimensions && (arg->base_kind == TYPE_KIND_LONG || arg->base_kind == TYPE_KIND_DOUBLE) ? 2 : 1;
+      }
+      if (lvt && ((ent = local_variable_table_lookup(slot, original_pc, lvt)))) {
         string_builder_append(builder, "%.*s", fmt_slice(*ent));
       } else {
-        // As HotSpot: parameters are numbered from 1, a long or double taking two slots (it printed the slot).
-        int slot = method->access_flags & ACCESS_STATIC ? 0 : 1, number = 1;
-        for (int i = 0; method->descriptor && i < method->descriptor->args_count && slot < source->index; ++i, ++number) {
-          field_descriptor *arg = method->descriptor->args + i;
-          slot += !arg->dimensions && (arg->base_kind == TYPE_KIND_LONG || arg->base_kind == TYPE_KIND_DOUBLE) ? 2 : 1;
-        }
-        string_builder_append(builder, "<parameter%d>", number);
+        string_builder_append(builder, "<parameter%d>", source->index); // as HotSpot
       }
     }
     break;

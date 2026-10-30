@@ -6,13 +6,18 @@ Diagnostics carry javac's own text: the rich formatter's message (simple class n
 clauses), the lint category ("[rawtypes] "), and mandatory warnings as warnings.
 
 diff --git a/compiler/src/main/java/org/teavm/javac/Compiler.java b/compiler/src/main/java/org/teavm/javac/Compiler.java
-index 39c5b42..ce98efe 100644
+index 39c5b42..99f43a6 100644
 --- a/compiler/src/main/java/org/teavm/javac/Compiler.java
 +++ b/compiler/src/main/java/org/teavm/javac/Compiler.java
-@@ -18,6 +18,12 @@ package org.teavm.javac;
+@@ -16,8 +16,17 @@
  
+ package org.teavm.javac;
+ 
++import com.sun.tools.javac.api.DiagnosticFormatter;
  import com.sun.tools.javac.main.JavaCompiler;
++import com.sun.tools.javac.util.BasicDiagnosticFormatter;
  import com.sun.tools.javac.util.Context;
++import com.sun.tools.javac.util.ForwardingDiagnosticFormatter;
 +import com.sun.tools.javac.util.JCDiagnostic;
 +import com.sun.tools.javac.util.Log;
 +import com.sun.tools.javac.util.Options;
@@ -22,7 +27,7 @@ index 39c5b42..ce98efe 100644
  import java.io.ByteArrayInputStream;
  import java.io.ByteArrayOutputStream;
  import java.io.IOException;
-@@ -65,10 +71,22 @@ public final class Compiler {
+@@ -65,10 +74,22 @@ public final class Compiler {
      private List<DiagnosticListenerRegistration> diagnosticListeners = new ArrayList<>();
      private ResourceProvider resourceProvider;
      private ClassHolderSource classSource;
@@ -45,7 +50,7 @@ index 39c5b42..ce98efe 100644
      @JSExport
      public void addSourceFile(String name, String content) {
          addFile(sourceFiles, name, content.getBytes(StandardCharsets.UTF_8));
-@@ -320,13 +338,85 @@ public final class Compiler {
+@@ -320,13 +341,91 @@ public final class Compiler {
              return;
          }
          var context = new Context();
@@ -63,6 +68,16 @@ index 39c5b42..ce98efe 100644
 +            putOption(javacOptions, option);
 +        }
          compiler = new SimpleJavaCompiler(context);
++        // A diagnostic's text is its lint category and message, without "Main.java:3: warning: " and the source line,
++        // which the page adds; JavaCompiler has put the rich formatter around javac's basic one.
++        if (Log.instance(context).getDiagnosticFormatter() instanceof ForwardingDiagnosticFormatter<?, ?> rich
++                && rich.getDelegatedFormatter() instanceof BasicDiagnosticFormatter basic) {
++            var configuration = basic.getConfiguration();
++            for (var kind : BasicDiagnosticFormatter.BasicConfiguration.BasicFormatKind.values()) {
++                configuration.setFormat(kind, "%L%m"); // with and without a position, and in a class file
++            }
++            configuration.setVisiblePart(DiagnosticFormatter.Configuration.DiagnosticPart.SOURCE, false);
++        }
          compiler.prepare();
      }
  
@@ -119,20 +134,16 @@ index 39c5b42..ce98efe 100644
 +            if (!(diagnostic instanceof JCDiagnostic javacDiagnostic)) {
 +                return super.getMessage();
 +            }
-+            var message = log.getDiagnosticFormatter().formatMessage(javacDiagnostic, Locale.ENGLISH);
-+            var kind = javacDiagnostic.getKind();
-+            if (javacDiagnostic.hasLintCategory()
-+                    && (kind == Diagnostic.Kind.WARNING || kind == Diagnostic.Kind.MANDATORY_WARNING)) {
-+                return "[" + javacDiagnostic.getLintCategory().option + "] " + message;
-+            }
-+            return message;
++            // format, not formatMessage: it starts each diagnostic afresh (formatMessage kept the previous one's type
++            // variables: "ArrayList<E#2>") and adds the "where E is a type-variable" clauses.
++            return log.getDiagnosticFormatter().format(javacDiagnostic, Locale.ENGLISH);
 +        }
 +    }
 +
      private class SimpleJavaCompiler extends JavaCompiler {
          SimpleJavaCompiler(Context context) {
              super(context);
-@@ -346,6 +436,9 @@ public final class Compiler {
+@@ -346,6 +445,9 @@ public final class Compiler {
              var units = stopIfError(CompileState.ENTER, parseFiles(files));
              enterTrees(stopIfError(CompileState.ENTER, initModules(units)));
              generate(desugar(flow(attribute(todo))));
