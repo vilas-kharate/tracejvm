@@ -28,12 +28,12 @@
       },
       {
         "path": "patches/0005-shiklo-javac-options.patch",
-        "sha256": "55144de8e87ae15eb482a5fb15759ced2a553e72f92648a974848f7aef2c9434"
+        "sha256": "6a96d63b5e834368f429258eaf5dbbed82e0dbf28c715a9deb8508c4a686944b"
       }
     ],
     "patchedFiles": {
       "compiler/build.gradle": "4da3057f9f940856d256cc5e68d4083831c24ad14487a90080620d1563f54f1e",
-      "compiler/src/main/java/org/teavm/javac/Compiler.java": "58c2993d6f48f7b75ab67038b11400312351fefb2d3506dcbfc39bf2c95db6fe",
+      "compiler/src/main/java/org/teavm/javac/Compiler.java": "fbc52b577f50cec6d18a6deac63342b0201fd23da561fe3fdd088e6f27acf9af",
       "compiler/src/main/java/org/teavm/javac/FileData.java": "d4ba43172f26b707a64858e60a642652fd45aea18847205c85128b26598507c0",
       "javac/build.gradle": "71f0bf02b2f487447e42f3d015eaeb32c98050349c9c86b2d51c8d58bd34086a",
       "settings.gradle": "8e7a9e72c518b3abb09ceb454d8908e767d4e9728c9240629c3378122440d90a"

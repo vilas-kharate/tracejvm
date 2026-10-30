@@ -133,6 +133,20 @@ THIRD_PARTY_NOTICES.md).
   `-Xlint…`, `-g…`, `-parameters`, `--enable-preview` … go through javac's own Arguments (the compiler had no options:
   no warnings could be turned on, no preview feature tried), and the deferred notes ("Note: Main.java uses unchecked
   or unsafe operations.") are reported after compiling, as javac does when it closes.
+- 2026-10-30 (after build 21): javac's options are set as `Option.process` does (Arguments needs classes TeaVM lacks),
+  `-Xlint:` lists included, and diagnostics are formatted by javac's own rich formatter with the `[lint category]`
+  prefix; mandatory warnings report as warnings (patch 0005, regenerated).
+- 2026-10-30: a program base (`vm_thread.program_base`, `TraceKernel.markProgramBase`): a launcher that calls a
+  program's `main` itself marks its frame, and stack traces, `Thread.getStackTrace` and StackWalker end above it, as
+  under a JDK launcher. Native `MethodHandle` frames are hidden like LambdaForms (`is_frame_hidden`, `vm/bjvm.h`).
+- 2026-10-30: helpful NullPointerException sources for `checkcast` (`vm/analysis.c`): `int v = map.get(k)` named a
+  `<parameter1>` instead of `"java.util.Map.get(Object)"`'s return value.
+- 2026-10-30: `java.lang.reflect.Array` get/set of each primitive type (`Array.setInt`, `getDouble` …, declared one
+  by one: the native scanner reads source text, not macros) — they threw UnsatisfiedLinkError.
+- 2026-10-30: `FileInputStream.available()` on a host-backed descriptor uses the host's fstat and seek (0 for a pipe
+  or socket).
+- 2026-10-30: the spring-server image adds `java.prefs` and `java.datatransfer` (`java.util.prefs` and the AWT
+  clipboard types; javac's descriptor lacked them).
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their

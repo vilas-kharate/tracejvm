@@ -122,6 +122,15 @@ public final class TraceKernel {
     return size;
   }
 
+  /**
+   * Marks (true) or unmarks (false) the calling method as the start of the program on this thread: stack traces and
+   * StackWalker end above it, as under a JDK launcher, which has no Java frames below {@code main}. For a launcher
+   * that calls a program's {@code main} itself (Shiklo fork, 2026-10-30).
+   */
+  public static void markProgramBase(boolean mark) {
+    markProgramBase0(mark);
+  }
+
   public static synchronized void addWindowSizeListener(Runnable listener) {
     WINDOW_SIZE_LISTENERS.add(Objects.requireNonNull(listener, "listener"));
   }
@@ -179,6 +188,8 @@ public final class TraceKernel {
   }
 
   private static native long[] identity0() throws IOException;
+
+  private static native void markProgramBase0(boolean mark);
 
   private static native long[] watchdog0(
       int action,

@@ -143,7 +143,9 @@ runtime_modules_for_profile() {
       echo "java.base,java.instrument,java.logging,java.management,java.naming,java.net.http,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.localedata,jdk.management,jdk.unsupported,jdk.zipfs"
       ;;
     spring-server)
-      echo "java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.localedata,jdk.management,jdk.unsupported,jdk.zipfs"
+      # java.datatransfer and java.prefs (java.desktop needs them, jlink adds them) are named so that the compiler's
+      # descriptor exports their packages too: java.util.prefs did not compile (Shiklo fork, 2026-10-30).
+      echo "java.base,java.datatransfer,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.prefs,java.sql,java.transaction.xa,java.xml,jdk.httpserver,jdk.localedata,jdk.management,jdk.unsupported,jdk.zipfs"
       ;;
     *)
       echo "Unknown TraceJVM runtime profile: $1" >&2

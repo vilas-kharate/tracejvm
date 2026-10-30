@@ -276,3 +276,179 @@ DECLARE_NATIVE("java/lang/reflect", Array, set, "(Ljava/lang/Object;ILjava/lang/
   }
   return value_null();
 }
+
+// ---- The primitive Array.getX / setX (Shiklo fork, 2026-10-30; all were missing: Array.setInt threw
+// UnsatisfiedLinkError). As HotSpot's Reflection::array_get / array_set: a primitive array, the element widened to the
+// asked type (JLS 5.1.2) on get, the value widened to the element type on set; otherwise IllegalArgumentException.
+
+// A primitive value: integral kinds (and boolean) in l, float and double in d.
+typedef struct {
+  s64 l;
+  double d;
+} array_primitive;
+
+static bool primitive_widens(type_kind from, type_kind to) {
+  if (from == to)
+    return true;
+  switch (from) {
+  case TYPE_KIND_BYTE:
+    return to == TYPE_KIND_SHORT || to == TYPE_KIND_INT || to == TYPE_KIND_LONG || to == TYPE_KIND_FLOAT ||
+           to == TYPE_KIND_DOUBLE;
+  case TYPE_KIND_SHORT:
+  case TYPE_KIND_CHAR:
+    return to == TYPE_KIND_INT || to == TYPE_KIND_LONG || to == TYPE_KIND_FLOAT || to == TYPE_KIND_DOUBLE;
+  case TYPE_KIND_INT:
+    return to == TYPE_KIND_LONG || to == TYPE_KIND_FLOAT || to == TYPE_KIND_DOUBLE;
+  case TYPE_KIND_LONG:
+    return to == TYPE_KIND_FLOAT || to == TYPE_KIND_DOUBLE;
+  case TYPE_KIND_FLOAT:
+    return to == TYPE_KIND_DOUBLE;
+  default:
+    return false;
+  }
+}
+
+static bool is_floating(type_kind kind) { return kind == TYPE_KIND_FLOAT || kind == TYPE_KIND_DOUBLE; }
+
+// The primitive array args[0] and index args[1], checked; null (with the exception raised) when they are not usable.
+static obj_header *primitive_array_at(vm_thread *thread, value *args) {
+  obj_header *array = args[0].handle->obj;
+  if (!array) {
+    raise_null_pointer_exception(thread);
+    return nullptr;
+  }
+  if (array->descriptor->kind == CD_KIND_ORDINARY || array->descriptor->kind == CD_KIND_PRIMITIVE) {
+    raise_vm_exception(thread, STR("java/lang/IllegalArgumentException"), STR("Argument is not an array"));
+    return nullptr;
+  }
+  if (array->descriptor->kind != CD_KIND_PRIMITIVE_ARRAY) {
+    raise_vm_exception(thread, STR("java/lang/IllegalArgumentException"), STR("argument type mismatch"));
+    return nullptr;
+  }
+  if (args[1].i < 0 || args[1].i >= ArrayLength(array)) {
+    raise_array_index_oob_exception(thread, args[1].i, ArrayLength(array));
+    return nullptr;
+  }
+  return array;
+}
+
+// Array.getX: the element as kind `as`; false with the exception raised.
+static bool array_get_primitive(vm_thread *thread, value *args, type_kind as, array_primitive *out) {
+  obj_header *array = primitive_array_at(thread, args);
+  if (!array)
+    return false;
+  type_kind kind = array->descriptor->primitive_component;
+  if (!primitive_widens(kind, as)) {
+    raise_vm_exception(thread, STR("java/lang/IllegalArgumentException"), STR("argument type mismatch"));
+    return false;
+  }
+  s32 i = args[1].i;
+  array_primitive v = {0, 0};
+  switch (kind) {
+  case TYPE_KIND_BOOLEAN: v.l = BooleanArrayLoad(array, i); break;
+  case TYPE_KIND_BYTE: v.l = ByteArrayLoad(array, i); break;
+  case TYPE_KIND_SHORT: v.l = ShortArrayLoad(array, i); break;
+  case TYPE_KIND_CHAR: v.l = CharArrayLoad(array, i); break;
+  case TYPE_KIND_INT: v.l = IntArrayLoad(array, i); break;
+  case TYPE_KIND_LONG: v.l = LongArrayLoad(array, i); break;
+  case TYPE_KIND_FLOAT: v.d = FloatArrayLoad(array, i); break;
+  case TYPE_KIND_DOUBLE: v.d = DoubleArrayLoad(array, i); break;
+  default: UNREACHABLE();
+  }
+  if (is_floating(as) && !is_floating(kind))
+    v.d = (double)v.l;
+  *out = v;
+  return true;
+}
+
+// Array.setX: v, of kind `from`, stored in args[0][args[1]] widened to the element's kind.
+static void array_set_primitive(vm_thread *thread, value *args, type_kind from, array_primitive v) {
+  obj_header *array = primitive_array_at(thread, args);
+  if (!array)
+    return;
+  type_kind kind = array->descriptor->primitive_component;
+  if (!primitive_widens(from, kind)) {
+    raise_vm_exception(thread, STR("java/lang/IllegalArgumentException"), STR("argument type mismatch"));
+    return;
+  }
+  if (is_floating(kind) && !is_floating(from))
+    v.d = (double)v.l;
+  s32 i = args[1].i;
+  switch (kind) {
+  case TYPE_KIND_BOOLEAN: BooleanArrayStore(array, i, v.l != 0); break;
+  case TYPE_KIND_BYTE: ByteArrayStore(array, i, (s8)v.l); break;
+  case TYPE_KIND_SHORT: ShortArrayStore(array, i, (s16)v.l); break;
+  case TYPE_KIND_CHAR: CharArrayStore(array, i, (u16)v.l); break;
+  case TYPE_KIND_INT: IntArrayStore(array, i, (s32)v.l); break;
+  case TYPE_KIND_LONG: LongArrayStore(array, i, v.l); break;
+  case TYPE_KIND_FLOAT: FloatArrayStore(array, i, (float)v.d); break;
+  case TYPE_KIND_DOUBLE: DoubleArrayStore(array, i, v.d); break;
+  default: UNREACHABLE();
+  }
+}
+
+// Written out one by one: codegen/scan_native_declarations.py finds natives in the source text, not in macros.
+DECLARE_NATIVE("java/lang/reflect", Array, getBoolean, "(Ljava/lang/Object;I)Z") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_BOOLEAN, &v) ? (stack_value){.i = v.l != 0} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getByte, "(Ljava/lang/Object;I)B") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_BYTE, &v) ? (stack_value){.i = (s8)v.l} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getChar, "(Ljava/lang/Object;I)C") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_CHAR, &v) ? (stack_value){.i = (u16)v.l} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getShort, "(Ljava/lang/Object;I)S") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_SHORT, &v) ? (stack_value){.i = (s16)v.l} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getInt, "(Ljava/lang/Object;I)I") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_INT, &v) ? (stack_value){.i = (s32)v.l} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getLong, "(Ljava/lang/Object;I)J") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_LONG, &v) ? (stack_value){.l = v.l} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getFloat, "(Ljava/lang/Object;I)F") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_FLOAT, &v) ? (stack_value){.f = (float)v.d} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, getDouble, "(Ljava/lang/Object;I)D") {
+  array_primitive v;
+  return array_get_primitive(thread, args, TYPE_KIND_DOUBLE, &v) ? (stack_value){.d = v.d} : value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setBoolean, "(Ljava/lang/Object;IZ)V") {
+  array_set_primitive(thread, args, TYPE_KIND_BOOLEAN, (array_primitive){.l = args[2].i != 0});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setByte, "(Ljava/lang/Object;IB)V") {
+  array_set_primitive(thread, args, TYPE_KIND_BYTE, (array_primitive){.l = (s8)args[2].i});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setChar, "(Ljava/lang/Object;IC)V") {
+  array_set_primitive(thread, args, TYPE_KIND_CHAR, (array_primitive){.l = (u16)args[2].i});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setShort, "(Ljava/lang/Object;IS)V") {
+  array_set_primitive(thread, args, TYPE_KIND_SHORT, (array_primitive){.l = (s16)args[2].i});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setInt, "(Ljava/lang/Object;II)V") {
+  array_set_primitive(thread, args, TYPE_KIND_INT, (array_primitive){.l = args[2].i});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setLong, "(Ljava/lang/Object;IJ)V") {
+  array_set_primitive(thread, args, TYPE_KIND_LONG, (array_primitive){.l = args[2].l});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setFloat, "(Ljava/lang/Object;IF)V") {
+  array_set_primitive(thread, args, TYPE_KIND_FLOAT, (array_primitive){.d = args[2].f});
+  return value_null();
+}
+DECLARE_NATIVE("java/lang/reflect", Array, setDouble, "(Ljava/lang/Object;ID)V") {
+  array_set_primitive(thread, args, TYPE_KIND_DOUBLE, (array_primitive){.d = args[2].d});
+  return value_null();
+}

@@ -7,6 +7,7 @@
 
 #include <async.h>
 #include <types.h>
+#include <string.h>
 #include <wchar.h>
 
 #include "classfile.h"
@@ -616,6 +617,15 @@ u16 stack_depth(const stack_frame *frame);
 
 static inline bool is_frame_native(const stack_frame *frame) { return frame->kind == FRAME_KIND_NATIVE; }
 static inline bool is_interpreter_frame(const stack_frame *frame) { return frame->kind == FRAME_KIND_INTERPRETER; }
+
+// A frame stack traces and StackWalker leave out, as HotSpot does: methods of hidden classes (lambda adapters,
+// LambdaForms), and the native linkTo* / invokeBasic of MethodHandle, which are intrinsics in HotSpot and never frames
+// (Shiklo fork, 2026-10-30: "at java.base/java.lang.invoke.MethodHandle.linkToStatic(Native Method)" showed).
+static inline bool is_frame_hidden(const stack_frame *frame) {
+  const classdesc *cd = frame->method->my_class;
+  return cd->is_hidden || (is_frame_native(frame) && cd->name.len == 29 &&
+                           memcmp(cd->name.chars, "java/lang/invoke/MethodHandle", 29) == 0);
+}
 value *get_native_args(const stack_frame *frame); // same as locals, just called args for native
 
 stack_value *frame_stack(stack_frame *frame);
@@ -699,6 +709,11 @@ typedef struct vm_thread {
   bool paused_in_debugger;
 
   void *profiler; // active profiler, if any. Before thread exit, the profiler is terminated.
+
+  // The frame that started the running program (its launcher), marked by the embedder (TraceKernel.markProgramBase):
+  // stack traces and StackWalker stop above it, as a JDK launcher has no Java frames below main (Shiklo fork,
+  // 2026-10-30). Null when not marked.
+  stack_frame *program_base;
 } vm_thread;
 
 // park/unpark

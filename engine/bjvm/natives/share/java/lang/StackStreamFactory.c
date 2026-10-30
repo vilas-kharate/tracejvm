@@ -34,7 +34,7 @@ typedef struct {
 } stack_walk;
 
 static stack_frame *visible_frame(stack_frame *frame, int mode) {
-  while (frame && !(mode & SHOW_HIDDEN_FRAMES) && frame->method->my_class->is_hidden)
+  while (frame && !(mode & SHOW_HIDDEN_FRAMES) && is_frame_hidden(frame))
     frame = frame->prev;
   return frame;
 }
@@ -116,6 +116,8 @@ static int fill_batch(vm_thread *thread, stack_walk *walk, int mode, handle *fra
     if (!fill_frame(thread, frames, i, walk->next, mode))
       return -1;
     walk->next = visible_frame(walk->next->prev, mode);
+    if (walk->next == thread->program_base) // the program's launcher and what ran it are not shown
+      walk->next = nullptr;
   }
   return count;
 }
@@ -144,7 +146,7 @@ DECLARE_ASYNC_NATIVE("java/lang", StackStreamFactory$AbstractStackWalker, callSt
   frame = visible_frame(frame, mode);
   for (int n = 0; n < skip && frame; ++n)
     frame = visible_frame(frame->prev, mode);
-  self->walk->next = frame;
+  self->walk->next = frame == thread->program_base ? nullptr : frame;
 
   int count = fill_batch(thread, self->walk, mode, args[6].handle, start_index, buffer_size);
   if (count < 0) {

@@ -122,3 +122,27 @@ DECLARE_NATIVE(
   }
   return (stack_value){.i = signal};
 }
+
+// boolean mark: the frame of markProgramBase's caller becomes this thread's program base (vm_thread.program_base), or
+// none. Frames of this class and of reflection or method handles between them are not the caller (Shiklo fork,
+// 2026-10-30).
+DECLARE_NATIVE("io/tracecode/tracekernel", TraceKernel, markProgramBase0, "(Z)V") {
+  if (!args[0].i) {
+    thread->program_base = nullptr;
+    return value_null();
+  }
+  stack_frame *frame = thread->stack.top;
+  while (frame) {
+    slice name = frame->method->my_class->name;
+#define STARTS_WITH(prefix) (name.len > sizeof(prefix) - 1 && memcmp(name.chars, prefix, sizeof(prefix) - 1) == 0)
+    bool internal = frame->method->my_class->is_hidden || utf8_equals(name, "io/tracecode/tracekernel/TraceKernel") ||
+                    STARTS_WITH("java/lang/invoke/") || STARTS_WITH("jdk/internal/reflect/") ||
+                    STARTS_WITH("java/lang/reflect/");
+#undef STARTS_WITH
+    if (!internal)
+      break;
+    frame = frame->prev;
+  }
+  thread->program_base = frame;
+  return value_null();
+}

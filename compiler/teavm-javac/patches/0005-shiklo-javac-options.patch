@@ -1,22 +1,29 @@
-TraceJVM (Shiklo fork, 2026-10-30): javac's options and its notes. Compiler.setOptions takes javac's options (one per
-line: -Xlint:all, -g, -parameters, --enable-preview ...), stored as javac's own option processing stores them (its
-Arguments needs classes TeaVM's class library lacks); the compiler had none, so warnings could not be turned on and
-preview features not tried. After compiling, the deferred diagnostics are reported, as javac does when it closes:
-the notes "Note: Main.java uses unchecked or unsafe operations." were never shown.
+TraceJVM (Shiklo fork, 2026-10-30): javac's options, notes and message text. Compiler.setOptions takes javac's options
+(one per line: -Xlint:all, -g, -parameters, --enable-preview ...), stored as javac's own option processing stores them
+(its Arguments needs classes TeaVM's class library lacks); the compiler had none. After compiling, the deferred
+diagnostics are reported, as javac does when it closes ("Note: Main.java uses unchecked or unsafe operations.").
+Diagnostics carry javac's own text: the rich formatter's message (simple class names, "where E is a type-variable"
+clauses), the lint category ("[rawtypes] "), and mandatory warnings as warnings.
 
 diff --git a/compiler/src/main/java/org/teavm/javac/Compiler.java b/compiler/src/main/java/org/teavm/javac/Compiler.java
-index 39c5b42..3778852 100644
+index 39c5b42..9313b21 100644
 --- a/compiler/src/main/java/org/teavm/javac/Compiler.java
 +++ b/compiler/src/main/java/org/teavm/javac/Compiler.java
-@@ -18,6 +18,7 @@ package org.teavm.javac;
+@@ -18,6 +18,13 @@ package org.teavm.javac;
  
  import com.sun.tools.javac.main.JavaCompiler;
  import com.sun.tools.javac.util.Context;
++import com.sun.tools.javac.util.JCDiagnostic;
++import com.sun.tools.javac.util.Log;
 +import com.sun.tools.javac.util.Options;
++import com.sun.tools.javac.util.RichDiagnosticFormatter;
++import java.util.Locale;
++import javax.tools.Diagnostic;
++import org.teavm.jso.JSProperty;
  import java.io.ByteArrayInputStream;
  import java.io.ByteArrayOutputStream;
  import java.io.IOException;
-@@ -65,10 +66,22 @@ public final class Compiler {
+@@ -65,10 +72,22 @@ public final class Compiler {
      private List<DiagnosticListenerRegistration> diagnosticListeners = new ArrayList<>();
      private ResourceProvider resourceProvider;
      private ClassHolderSource classSource;
@@ -39,8 +46,17 @@ index 39c5b42..3778852 100644
      @JSExport
      public void addSourceFile(String name, String content) {
          addFile(sourceFiles, name, content.getBytes(StandardCharsets.UTF_8));
-@@ -323,10 +336,37 @@ public final class Compiler {
-         context.put(DiagnosticListener.class, new DiagnosticListenerImpl(diagnosticListeners));
+@@ -320,13 +339,87 @@ public final class Compiler {
+             return;
+         }
+         var context = new Context();
+-        context.put(DiagnosticListener.class, new DiagnosticListenerImpl(diagnosticListeners));
++        context.put(DiagnosticListener.class, (DiagnosticListener<JavaFileObject>) diagnostic -> {
++            var wrapper = new JavacTextDiagnostic(diagnostic, Log.instance(context));
++            for (var reg : diagnosticListeners) {
++                reg.listener.onDiagnostic(wrapper);
++            }
++        });
          var fileManager = new FileManagerImpl(sourceFiles, classFiles, sdkFiles, outputFiles);
          context.put(JavaFileManager.class, fileManager);
 +        var javacOptions = Options.instance(context);
@@ -48,6 +64,8 @@ index 39c5b42..3778852 100644
 +            putOption(javacOptions, option);
 +        }
          compiler = new SimpleJavaCompiler(context);
++        // As javac's own task does: messages with simple class names and "where T is a type-variable" clauses.
++        RichDiagnosticFormatter.instance(context);
          compiler.prepare();
      }
  
@@ -74,10 +92,50 @@ index 39c5b42..3778852 100644
 +        }
 +    }
 +
++    /**
++     * A javac diagnostic as javac writes it (Shiklo fork, 2026-10-30): the message from javac's own formatter (the rich
++     * one: "found raw type: List", "where E is a type-variable: ..."), with the lint category ("[rawtypes] "), and a
++     * mandatory warning (-Xlint:unchecked, -Xlint:deprecation) as a warning; they came with full class names, no
++     * category, and as "other".
++     */
++    static final class JavacTextDiagnostic extends JavaDiagnostic {
++        private final Diagnostic<? extends JavaFileObject> diagnostic;
++        private final Log log;
++
++        JavacTextDiagnostic(Diagnostic<? extends JavaFileObject> diagnostic, Log log) {
++            super(diagnostic);
++            this.diagnostic = diagnostic;
++            this.log = log;
++        }
++
++        @Override
++        @JSExport
++        @JSProperty
++        public String getSeverity() {
++            return diagnostic.getKind() == Diagnostic.Kind.MANDATORY_WARNING ? "warning" : super.getSeverity();
++        }
++
++        @Override
++        @JSExport
++        @JSProperty
++        public String getMessage() {
++            if (!(diagnostic instanceof JCDiagnostic javacDiagnostic)) {
++                return super.getMessage();
++            }
++            var message = log.getDiagnosticFormatter().formatMessage(javacDiagnostic, Locale.ENGLISH);
++            var kind = javacDiagnostic.getKind();
++            if (javacDiagnostic.hasLintCategory()
++                    && (kind == Diagnostic.Kind.WARNING || kind == Diagnostic.Kind.MANDATORY_WARNING)) {
++                return "[" + javacDiagnostic.getLintCategory().option + "] " + message;
++            }
++            return message;
++        }
++    }
++
      private class SimpleJavaCompiler extends JavaCompiler {
          SimpleJavaCompiler(Context context) {
              super(context);
-@@ -346,6 +386,9 @@ public final class Compiler {
+@@ -346,6 +439,9 @@ public final class Compiler {
              var units = stopIfError(CompileState.ENTER, parseFiles(files));
              enterTrees(stopIfError(CompileState.ENTER, initModules(units)));
              generate(desugar(flow(attribute(todo))));

@@ -20,16 +20,17 @@ obj_header **backtrace_object(obj_header *throwable) { return &((struct native_T
 // The stack trace elements of the frames [top, top->prev, ...] of any thread's stack, allocated by thread. As HotSpot,
 // frames of hidden classes (lambda bodies' adapters, LambdaForms) are not shown. Null when the array could not be
 // allocated; when an element or its strings could not be, the array holds the elements made so far. Used by
-// Throwable.fillInStackTrace and Thread.dumpThreads.
+// Throwable.fillInStackTrace and Thread.dumpThreads. The walk stops at base, the thread's program base (see
+// vm_thread.program_base), when set.
 obj_header *make_stack_trace_element(vm_thread *thread, stack_frame *frame);
 
-obj_header *make_stack_trace_elements(vm_thread *thread, stack_frame *top) {
+obj_header *make_stack_trace_elements(vm_thread *thread, stack_frame *top, stack_frame *base) {
   classdesc *StackTraceElement = cached_classes(thread->vm)->stack_trace_element;
   stack_frame *frame = top;
 
   int n_frames = 0;
-  for (stack_frame *tmp = frame; tmp; tmp = tmp->prev) {
-    if (!tmp->method->my_class->is_hidden)
+  for (stack_frame *tmp = frame; tmp && tmp != base; tmp = tmp->prev) {
+    if (!is_frame_hidden(tmp))
       ++n_frames;
   }
 
@@ -41,7 +42,7 @@ obj_header *make_stack_trace_elements(vm_thread *thread, stack_frame *top) {
   }
 
   for (int j = 0; n_frames > 0; --n_frames, ++j) {
-    while (frame && frame->method->my_class->is_hidden)
+    while (frame && is_frame_hidden(frame))
       frame = frame->prev;
     DCHECK(frame);
     obj_header *e = make_stack_trace_element(thread, frame);
@@ -119,7 +120,7 @@ DECLARE_NATIVE("java/lang", Throwable, fillInStackTrace, "(I)Ljava/lang/Throwabl
     frame = frame->prev;
   }
 
-  obj_header *stack_trace = make_stack_trace_elements(thread, frame);
+  obj_header *stack_trace = make_stack_trace_elements(thread, frame, thread->program_base);
   if (!stack_trace) // Failed to allocate
     return value_null();
   ((struct native_Throwable *)obj->obj)->depth = ArrayLength(stack_trace);

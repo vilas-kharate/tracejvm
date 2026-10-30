@@ -137,12 +137,13 @@ DECLARE_NATIVE("java/io", FileInputStream, available0, "()I") {
   if (unix_fd == 0 && thread->vm->poll_available_stdin &&
       !tracejvm_host_routes_fd(unix_fd)) {
     available = thread->vm->poll_available_stdin(thread->vm->stdio_override_param);
-  } else if (tracejvm_host_is_remote_fd(unix_fd)) {
-    available = 0;
   } else {
+    // A host's file is asked as a local one is: its size less the position (Shiklo fork, 2026-10-30: it was always 0,
+    // as for a pipe). What a host's socket or keyboard has waiting is not known here: 0, which is allowed.
+    bool remote = tracejvm_host_is_remote_fd(unix_fd);
     struct stat st;
-    if (fstat(unix_fd, &st) == 0 && S_ISREG(st.st_mode)) {
-      off_t position = lseek(unix_fd, 0, SEEK_CUR);
+    if ((remote ? tracejvm_host_fstat(unix_fd, &st) : fstat(unix_fd, &st)) == 0 && S_ISREG(st.st_mode)) {
+      off_t position = remote ? tracejvm_host_seek(unix_fd, 0, SEEK_CUR) : lseek(unix_fd, 0, SEEK_CUR);
       if (position < 0) {
         raise_vm_exception(thread, STR("java/io/IOException"),
                            STR("Error getting current file position"));
@@ -150,6 +151,8 @@ DECLARE_NATIVE("java/io", FileInputStream, available0, "()I") {
       }
       off_t remaining = st.st_size > position ? st.st_size - position : 0;
       available = remaining > INT_MAX ? INT_MAX : (int)remaining;
+    } else if (remote) {
+      available = 0;
     } else {
       int err = ioctl(unix_fd, FIONREAD, &available);
       if (err < 0) {

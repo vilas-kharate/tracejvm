@@ -931,6 +931,7 @@ static void write_npe_sources(bytecode_insn *insn, const analy_stack_state *stac
   case insn_athrow:
   case insn_monitorenter:
   case insn_monitorexit:
+  case insn_checkcast: // not an NPE itself, but a helpful NPE message follows a cast back to its operand (Shiklo fork)
   case insn_getfield: {
     *a = stack->entries[sd - 1].source; // just the one source, which is the object
     break;
