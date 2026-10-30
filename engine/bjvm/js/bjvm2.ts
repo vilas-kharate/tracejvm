@@ -1201,34 +1201,76 @@ export class RuntimeVM<Classes> {
     waitingForYield: number = 0;
     pending: Function[] = [];  // hook here to be called every time the timeout fires
 
-    scheduleTimeout(waitUs: number = 0) {
-        if (this.destroyed) {
+    // Scheduler steps run back to back within one task, for up to STEP_BATCH_MS, while some thread can run; the next
+    // batch follows through a MessageChannel, which browsers do not delay, instead of setTimeout(0), which they hold
+    // for 4 ms once timers nest. Each step runs one thread until it yields, so every switch between threads (start,
+    // join, an executor's tasks, a wakeup) cost 4 ms: 200 threads that each did nothing took a second. A run of tiny
+    // steps means the threads only poll (a read waiting for the keyboard): then the next batch waits for a timer, so
+    // waiting does not keep the CPU busy (Shiklo fork, 2026-10-30).
+    static readonly STEP_BATCH_MS = 8;
+    static readonly IDLE_STEP_MS = 0.05;
+    static readonly IDLE_STEPS = 20;
+    private immediate: MessageChannel | undefined;
+    private immediateQueued = false;
+
+    scheduleTimeout(waitUs: number = 0, polling: boolean = false) {
+        if (this.destroyed || this.immediateQueued) {
             return;
         }
-        const module = this._module;
         if (this.waitingForYield > waitUs && this.timeout !== -1 as unknown as ReturnType<typeof setTimeout>) {
             clearTimeout(this.timeout);
             this.timeout = -1 as unknown as ReturnType<typeof setTimeout>;
         }
-        if (this.timeout === -1 as unknown as ReturnType<typeof setTimeout>) {
-            this.timeout = setTimeout(() => {
-                this.timeout = -1 as unknown as ReturnType<typeof setTimeout>;
-                if (this.destroyed) {
-                    return;
-                }
-                const status = this.withHostContext(() =>
-                    module._ffi_rr_scheduler_step(this.scheduler),
-                );
-                if (status !== 0) {
-                    const waitUs = module._ffi_rr_scheduler_wait_for_us(this.scheduler);
-                    this.scheduleTimeout(this.waitingForYield = waitUs);
-                }
-                for (let i = 0; i < this.pending.length; i++) {
-                    this.pending[i]!();
-                }
-                this.pending.length = 0;
-            }, waitUs / 1000);
+        if (this.timeout !== -1 as unknown as ReturnType<typeof setTimeout>) {
+            return;
         }
+        if (waitUs === 0 && !polling && typeof MessageChannel !== "undefined") {
+            if (!this.immediate) {
+                this.immediate = new MessageChannel();
+                this.immediate.port1.onmessage = () => {
+                    this.immediateQueued = false;
+                    this.runSchedulerBatch();
+                };
+            }
+            this.immediateQueued = true;
+            this.immediate.port2.postMessage(null);
+            return;
+        }
+        this.timeout = setTimeout(() => {
+            this.timeout = -1 as unknown as ReturnType<typeof setTimeout>;
+            this.runSchedulerBatch();
+        }, waitUs / 1000);
+    }
+
+    private runSchedulerBatch() {
+        if (this.destroyed) {
+            return;
+        }
+        const module = this._module;
+        const started = performance.now();
+        let status = 0, waitUs = 0, idleSteps = 0;
+        for (;;) {
+            const stepStarted = performance.now();
+            status = this.withHostContext(() =>
+                module._ffi_rr_scheduler_step(this.scheduler),
+            );
+            if (status === 0 || this.destroyed) {
+                break;
+            }
+            waitUs = module._ffi_rr_scheduler_wait_for_us(this.scheduler);
+            const now = performance.now();
+            idleSteps = now - stepStarted < RuntimeVM.IDLE_STEP_MS ? idleSteps + 1 : 0;
+            if (waitUs > 0 || idleSteps >= RuntimeVM.IDLE_STEPS || now - started >= RuntimeVM.STEP_BATCH_MS) {
+                break;
+            }
+        }
+        if (status !== 0 && !this.destroyed) {
+            this.scheduleTimeout(this.waitingForYield = waitUs, idleSteps >= RuntimeVM.IDLE_STEPS);
+        }
+        for (let i = 0; i < this.pending.length; i++) {
+            this.pending[i]!();
+        }
+        this.pending.length = 0;
     }
 
     // Low-level method scheduling apparatus
@@ -1310,6 +1352,12 @@ export class RuntimeVM<Classes> {
             clearTimeout(this.timeout);
             this.timeout = -1 as unknown as ReturnType<typeof setTimeout>;
         }
+        if (this.immediate) {
+            this.immediate.port1.onmessage = null;
+            this.immediate.port1.close();
+            this.immediate = undefined;
+        }
+        this.immediateQueued = false;
         this.waitingForYield = 0;
 
         // Wake JavaScript promises before invalidating their native records.

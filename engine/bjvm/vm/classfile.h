@@ -266,6 +266,9 @@ typedef enum : u8 {
   insn_exp, // (D)D (Shiklo fork, 2026-10-30)
   insn_log, // (D)D
   insn_log10, // (D)D
+  insn_bigint_mul_add, // BigInteger.implMulAdd ([I[IIII)I (Shiklo fork, 2026-10-30)
+  insn_bigint_multiply_to_len, // BigInteger.implMultiplyToLen ([II[II[I)[I
+  insn_bigint_square_to_len, // BigInteger.implSquareToLen ([II[II)[I
 
   /** default-off Java-library hot-path experiment */
   insn_hot_aot, // generated build-time AOT for a resolved static call

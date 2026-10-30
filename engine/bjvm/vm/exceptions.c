@@ -121,7 +121,7 @@ void raise_array_index_oob_exception(vm_thread *thread, int index, int length) {
 
 // Where a class lives, as HotSpot's Klass::class_in_module_of_loader: "module java.base" / "unnamed module", and
 // "loader 'bootstrap'", "loader 'app'" (a named loader), or "loader com.example.MyLoader @1b6d3586". An array lives where
-// its element class does. TraceJVM's run loader and the Shiklo launcher's program loader, both unnamed, load what the
+// its element class does. The embedder's run loader and the Shiklo launcher's program loader, both unnamed, load what the
 // JDK's application loader would: they are shown as 'app'. On failure the text stays empty.
 static void describe_class_place(vm_thread *thread, const classdesc *cd, char *module, size_t module_capacity,
                                  char *loader, size_t loader_capacity) {

@@ -1911,6 +1911,21 @@ static int intrinsify(vm_thread *thread, bytecode_insn *inst) {
     }
     return 1;
   }
+  if (utf8_equals(method->my_class->name, "java/math/BigInteger")) {
+    // BigInteger's inner loops in C, as HotSpot's intrinsics of the same methods (Shiklo fork, 2026-10-30): modPow,
+    // and so primality tests and RSA keys, spent nearly all their time in them (an RSA-2048 key took up to 115 s).
+    if (utf8_equals(method->name, "implMulAdd") && utf8_equals(method->unparsed_descriptor, "([I[IIII)I")) {
+      inst->kind = insn_bigint_mul_add;
+    } else if (utf8_equals(method->name, "implMultiplyToLen") &&
+               utf8_equals(method->unparsed_descriptor, "([II[II[I)[I")) {
+      inst->kind = insn_bigint_multiply_to_len;
+    } else if (utf8_equals(method->name, "implSquareToLen") && utf8_equals(method->unparsed_descriptor, "([II[II)[I")) {
+      inst->kind = insn_bigint_square_to_len;
+    } else {
+      return 0;
+    }
+    return 1;
+  }
   if (thread->vm->experimental_hot_intrinsics) {
     switch (identify_hot_intrinsic(method)) {
     case HOT_INTRINSIC_ARRAYS_SUPPORT_UNSIGNED_HASH_CODE:
@@ -2943,6 +2958,152 @@ static s64 hot_string_latin1_equals_impl_void(ARGS_VOID) {
 }
 FORWARD_TO_NULLARY(hot_string_latin1_equals)
 
+// ---- BigInteger's inner loops (Shiklo fork, 2026-10-30), line for line as JDK 23's Java (BigInteger.implMulAdd,
+// implMultiplyToLen, implSquareToLen with mulAdd, addOne and primitiveLeftShift), on the magnitudes' int arrays read as
+// unsigned. Their Java callers check the arguments; the ranges are checked again here so that a bad call throws
+// ArrayIndexOutOfBoundsException as the Java code would, and never writes outside an array.
+
+static u32 bigint_mul_add(u32 *out, s32 out_length, const u32 *in, s32 offset, s32 len, u32 k) {
+  u64 carry = 0;
+  offset = out_length - offset - 1;
+  for (s32 j = len - 1; j >= 0; j--) {
+    u64 product = (u64)in[j] * k + out[offset] + carry;
+    out[offset--] = (u32)product;
+    carry = product >> 32;
+  }
+  return (u32)carry;
+}
+
+static u32 bigint_add_one(u32 *a, s32 a_length, s32 offset, s32 mlen, u32 carry) {
+  offset = a_length - 1 - mlen - offset;
+  u64 t = (u64)a[offset] + carry;
+  a[offset] = (u32)t;
+  if ((t >> 32) == 0)
+    return 0;
+  while (--mlen >= 0) {
+    if (--offset < 0) // carry out of number
+      return 1;
+    a[offset]++;
+    if (a[offset] != 0)
+      return 0;
+  }
+  return 1;
+}
+
+// Whether array holds [from, to) (to > from), else ArrayIndexOutOfBoundsException.
+static bool bigint_range(vm_thread *thread, obj_header *array, s64 from, s64 to) {
+  if (unlikely(!array)) {
+    raise_null_pointer_exception(thread);
+    return false;
+  }
+  s32 length = ArrayLength(array);
+  if (unlikely(from < 0 || to > length || from > to)) {
+    raise_array_index_oob_exception(thread, (int)(from < 0 ? from : to - 1), length);
+    return false;
+  }
+  return true;
+}
+
+// int implMulAdd(int[] out, int[] in, int offset, int len, int k)
+static s64 bigint_mul_add_impl_void(ARGS_VOID) {
+  DEBUG_CHECK();
+  stack_value *args = sp - 5;
+  obj_header *out = args[0].obj, *in = args[1].obj;
+  s32 offset = args[2].i, len = args[3].i;
+  if (len > 0) {
+    s64 last = (out ? ArrayLength(out) : 0) - (s64)offset - 1; // the highest index written
+    if (!bigint_range(thread, in, 0, len) || !bigint_range(thread, out, last - len + 1, last + 1)) {
+      SPILL_VOID
+      return RETVAL_EXCEPTION_THROWN;
+    }
+  }
+  s32 carry = len > 0 ? (s32)bigint_mul_add(ArrayData(out), ArrayLength(out), ArrayData(in), offset, len, (u32)args[4].i)
+                      : 0;
+  sp -= 4;
+  NEXT_INT(carry);
+}
+FORWARD_TO_NULLARY(bigint_mul_add)
+
+// int[] implMultiplyToLen(int[] x, int xlen, int[] y, int ylen, int[] z): z, at least xlen + ylen long, is
+// allocated by the caller (multiplyToLen).
+static s64 bigint_multiply_to_len_impl_void(ARGS_VOID) {
+  DEBUG_CHECK();
+  stack_value *args = sp - 5;
+  obj_header *x_array = args[0].obj, *y_array = args[2].obj, *z_array = args[4].obj;
+  s32 xlen = args[1].i, ylen = args[3].i;
+  if (!bigint_range(thread, x_array, 0, xlen) || !bigint_range(thread, y_array, 0, ylen) ||
+      !bigint_range(thread, z_array, 0, (s64)xlen + ylen) || unlikely(xlen < 1 || ylen < 1)) {
+    if (!thread->current_exception)
+      raise_array_index_oob_exception(thread, -1, xlen < 1 ? xlen : ylen);
+    SPILL_VOID
+    return RETVAL_EXCEPTION_THROWN;
+  }
+  const u32 *x = ArrayData(x_array), *y = ArrayData(y_array);
+  u32 *z = ArrayData(z_array);
+  s32 xstart = xlen - 1, ystart = ylen - 1;
+  u64 carry = 0;
+  for (s32 j = ystart, k = ystart + 1 + xstart; j >= 0; j--, k--) {
+    u64 product = (u64)y[j] * x[xstart] + carry;
+    z[k] = (u32)product;
+    carry = product >> 32;
+  }
+  z[xstart] = (u32)carry;
+  for (s32 i = xstart - 1; i >= 0; i--) {
+    carry = 0;
+    for (s32 j = ystart, k = ystart + 1 + i; j >= 0; j--, k--) {
+      u64 product = (u64)y[j] * x[i] + z[k] + carry;
+      z[k] = (u32)product;
+      carry = product >> 32;
+    }
+    z[i] = (u32)carry;
+  }
+  sp -= 4;
+  NEXT_INT(z_array);
+}
+FORWARD_TO_NULLARY(bigint_multiply_to_len)
+
+// int[] implSquareToLen(int[] x, int len, int[] z, int zlen), checked by its caller as implSquareToLenChecks.
+static s64 bigint_square_to_len_impl_void(ARGS_VOID) {
+  DEBUG_CHECK();
+  stack_value *args = sp - 4;
+  obj_header *x_array = args[0].obj, *z_array = args[2].obj;
+  s32 len = args[1].i, zlen = args[3].i;
+  if (!bigint_range(thread, x_array, 0, len) || !bigint_range(thread, z_array, 0, 2 * (s64)len) ||
+      !bigint_range(thread, z_array, 0, zlen) || unlikely(len < 1 || zlen < 2 * (s64)len)) {
+    if (!thread->current_exception)
+      raise_array_index_oob_exception(thread, len < 1 ? len : zlen, len);
+    SPILL_VOID
+    return RETVAL_EXCEPTION_THROWN;
+  }
+  const u32 *x = ArrayData(x_array);
+  u32 *z = ArrayData(z_array);
+  s32 z_length = ArrayLength(z_array);
+
+  // Store the squares, right shifted one bit (i.e., divided by 2)
+  u32 last_product_low_word = 0;
+  for (s32 j = 0, i = 0; j < len; j++) {
+    u64 piece = x[j];
+    u64 product = piece * piece;
+    z[i++] = (last_product_low_word << 31) | (u32)(product >> 33);
+    z[i++] = (u32)(product >> 1);
+    last_product_low_word = (u32)product;
+  }
+  // Add in off-diagonal sums
+  for (s32 i = len, offset = 1; i > 0; i--, offset += 2) {
+    u32 t = x[i - 1];
+    t = bigint_mul_add(z, z_length, x, offset, i - 1, t);
+    bigint_add_one(z, z_length, offset - 1, i, t);
+  }
+  // Shift back up and set low bit (primitiveLeftShift(z, zlen, 1))
+  for (s32 i = 0; i < zlen - 1; i++)
+    z[i] = (z[i] << 1) | (z[i + 1] >> 31);
+  z[zlen - 1] <<= 1;
+  z[zlen - 1] |= x[len - 1] & 1;
+  sp -= 3;
+  NEXT_INT(z_array);
+}
+FORWARD_TO_NULLARY(bigint_square_to_len)
+
 static s64 pow_impl_double(ARGS_DOUBLE) {
   DEBUG_CHECK();
   double result = pow((sp - 2)->d, tos);
@@ -3525,6 +3686,9 @@ PAGE_ALIGN static s64 (*jmp_table_void[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_hot_aot] = hot_aot_impl_void,
     [insn_hot_arrays_support_unsigned_hash_code] = hot_arrays_support_unsigned_hash_code_impl_void,
     [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_void,
+    [insn_bigint_mul_add] = bigint_mul_add_impl_void,
+    [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_void,
+    [insn_bigint_square_to_len] = bigint_square_to_len_impl_void,
 };
 
 PAGE_ALIGN static s64 (*jmp_table_double[MAX_INSN_KIND])(ARGS_VOID) = {
@@ -3605,7 +3769,10 @@ PAGE_ALIGN static s64 (*jmp_table_double[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_log10] = log10_impl_double,
     [insn_hot_aot] = hot_aot_impl_double,
     [insn_hot_arrays_support_unsigned_hash_code] = hot_arrays_support_unsigned_hash_code_impl_double,
-    [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_double};
+    [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_double,
+    [insn_bigint_mul_add] = bigint_mul_add_impl_double,
+    [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_double,
+    [insn_bigint_square_to_len] = bigint_square_to_len_impl_double};
 
 PAGE_ALIGN static s64 (*jmp_table_int[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_nop] = nop_impl_int,
@@ -3770,6 +3937,9 @@ PAGE_ALIGN static s64 (*jmp_table_int[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_hot_aot] = hot_aot_impl_int,
     [insn_hot_arrays_support_unsigned_hash_code] = hot_arrays_support_unsigned_hash_code_impl_int,
     [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_int,
+    [insn_bigint_mul_add] = bigint_mul_add_impl_int,
+    [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_int,
+    [insn_bigint_square_to_len] = bigint_square_to_len_impl_int,
 };
 
 PAGE_ALIGN static s64 (*jmp_table_float[MAX_INSN_KIND])(ARGS_VOID) = {
@@ -3847,4 +4017,7 @@ PAGE_ALIGN static s64 (*jmp_table_float[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_sqrt] = sqrt_impl_float,
     [insn_hot_aot] = hot_aot_impl_float,
     [insn_hot_arrays_support_unsigned_hash_code] = hot_arrays_support_unsigned_hash_code_impl_float,
-    [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_float};
+    [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_float,
+    [insn_bigint_mul_add] = bigint_mul_add_impl_float,
+    [insn_bigint_multiply_to_len] = bigint_multiply_to_len_impl_float,
+    [insn_bigint_square_to_len] = bigint_square_to_len_impl_float};
