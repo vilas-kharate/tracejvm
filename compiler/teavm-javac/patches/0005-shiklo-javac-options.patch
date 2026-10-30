@@ -1,0 +1,60 @@
+TraceJVM (Shiklo fork, 2026-10-30): javac's options and its notes. Compiler.setOptions takes javac's options (one per
+line: -Xlint:all, -g, -parameters, --enable-preview ...), which go through javac's own Arguments before the compiler
+reads them; the compiler had none, so warnings could not be turned on and preview features not tried. After
+compiling, the deferred diagnostics are reported, as javac does when it closes: the notes "Note: Main.java uses
+unchecked or unsafe operations." were never shown.
+
+diff --git a/compiler/src/main/java/org/teavm/javac/Compiler.java b/compiler/src/main/java/org/teavm/javac/Compiler.java
+index 39c5b42..8c643ba 100644
+--- a/compiler/src/main/java/org/teavm/javac/Compiler.java
++++ b/compiler/src/main/java/org/teavm/javac/Compiler.java
+@@ -16,6 +16,7 @@
+ 
+ package org.teavm.javac;
+ 
++import com.sun.tools.javac.main.Arguments;
+ import com.sun.tools.javac.main.JavaCompiler;
+ import com.sun.tools.javac.util.Context;
+ import java.io.ByteArrayInputStream;
+@@ -65,10 +66,20 @@ public final class Compiler {
+     private List<DiagnosticListenerRegistration> diagnosticListeners = new ArrayList<>();
+     private ResourceProvider resourceProvider;
+     private ClassHolderSource classSource;
++    private List<String> options = List.of();
+ 
+     Compiler() {
+     }
+ 
++    /**
++     * javac's options for the next compilations, one per line (-Xlint:all, -g, -parameters, --enable-preview …), as the
++     * javac command line takes them (TraceJVM, Shiklo fork, 2026-10-30).
++     */
++    @JSExport
++    public void setOptions(String lines) {
++        options = lines.isEmpty() ? List.of() : List.of(lines.split("\n"));
++    }
++
+     @JSExport
+     public void addSourceFile(String name, String content) {
+         addFile(sourceFiles, name, content.getBytes(StandardCharsets.UTF_8));
+@@ -323,6 +334,10 @@ public final class Compiler {
+         context.put(DiagnosticListener.class, new DiagnosticListenerImpl(diagnosticListeners));
+         var fileManager = new FileManagerImpl(sourceFiles, classFiles, sdkFiles, outputFiles);
+         context.put(JavaFileManager.class, fileManager);
++        if (!options.isEmpty()) {
++            // As javac's own task: the options go through javac's Arguments before the compiler reads them.
++            Arguments.instance(context).init("javac", options, List.of(), List.of());
++        }
+         compiler = new SimpleJavaCompiler(context);
+         compiler.prepare();
+     }
+@@ -346,6 +361,9 @@ public final class Compiler {
+             var units = stopIfError(CompileState.ENTER, parseFiles(files));
+             enterTrees(stopIfError(CompileState.ENTER, initModules(units)));
+             generate(desugar(flow(attribute(todo))));
++            // javac's notes about the whole compilation ("Note: Main.java uses unchecked or unsafe operations."),
++            // which javac reports when it closes.
++            reportDeferredDiagnostics();
+             return log.nerrors == 0;
+         }
+     }

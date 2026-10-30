@@ -21,6 +21,8 @@ obj_header **backtrace_object(obj_header *throwable) { return &((struct native_T
 // frames of hidden classes (lambda bodies' adapters, LambdaForms) are not shown. Null when the array could not be
 // allocated; when an element or its strings could not be, the array holds the elements made so far. Used by
 // Throwable.fillInStackTrace and Thread.dumpThreads.
+obj_header *make_stack_trace_element(vm_thread *thread, stack_frame *frame);
+
 obj_header *make_stack_trace_elements(vm_thread *thread, stack_frame *top) {
   classdesc *StackTraceElement = cached_classes(thread->vm)->stack_trace_element;
   stack_frame *frame = top;
@@ -42,67 +44,66 @@ obj_header *make_stack_trace_elements(vm_thread *thread, stack_frame *top) {
     while (frame && frame->method->my_class->is_hidden)
       frame = frame->prev;
     DCHECK(frame);
-
-    // Create the stack trace element
-    handle *e = make_handle(thread, new_object(thread, StackTraceElement));
-    if (!e->obj) { // Failed to allocate StackTraceElement
-      drop_handle(thread, e);
-      goto done;
-    }
-
-    cp_method *method = frame->method;
-
-#define E ((struct native_StackTraceElement *)e->obj)
-    // As HotSpot's java_lang_StackTraceElement::fill_in (Shiklo fork, 2026-10-28): the class's binary name with dots,
-    // its module's name ("java.base/java.lang.Integer.parseInt"), no file name when the class has no SourceFile
-    // attribute ("Unknown Source"; it showed the method's name), and -2 for a native method ("Native Method").
-    int line = is_frame_native(frame) ? -2 : get_line_number(method->code, frame->program_counter);
-    object o = (void *)get_class_mirror(thread, method->my_class);
-    if (!o)
-      goto element_oom;
-    E->declaringClassObject = o;
-    obj_header *module = ((struct native_Class *)o)->module;
-    if (module)
-      E->moduleName = LoadFieldObject(module, "java/lang/String", "name"); // null for the unnamed module
-    INIT_STACK_STRING(binary_name, 1024);
-    exchange_slashes_and_dots(&binary_name, method->my_class->name);
-    o = MakeJStringFromModifiedUTF8(thread, binary_name, true);
-    if (!o)
-      goto element_oom;
-    E->declaringClass = o;
-    o = MakeJStringFromModifiedUTF8(thread, method->name, true);
-    if (!o)
-      goto element_oom;
-    E->methodName = o;
-    attribute_source_file *sf = method->my_class->source_file;
-    o = nullptr;
-    if (sf) {
-      o = MakeJStringFromModifiedUTF8(thread, sf->name, true);
-      if (!o)
-        goto element_oom;
-    }
-
-    E->fileName = o;
-    E->lineNumber = line;
-    *((void **)ArrayData(stack_trace->obj) + j) = e->obj;
-
-#if 0
-    fprintf(stderr, "Stack trace element %d: %.*s.%.*s (%s:%d)\n", j, fmt_slice(method->my_class->name), fmt_slice(method->name),
-            sf ? sf->name.chars : "unknown", line);
-#endif
-#undef E
-    drop_handle(thread, e);
+    obj_header *e = make_stack_trace_element(thread, frame);
+    if (!e) // out of memory: the elements made so far
+      break;
+    *((void **)ArrayData(stack_trace->obj) + j) = e;
     frame = frame->prev;
-    continue;
-
-  element_oom:
-    drop_handle(thread, e);
-    goto done;
   }
 
-done:;
   obj_header *result = stack_trace->obj;
   drop_handle(thread, stack_trace);
+  return result;
+}
+
+// The StackTraceElement of one frame, allocated by thread; null when out of memory. Also used by StackWalker's frames
+// (StackStreamFactory.c).
+obj_header *make_stack_trace_element(vm_thread *thread, stack_frame *frame) {
+  handle *e = make_handle(thread, new_object(thread, cached_classes(thread->vm)->stack_trace_element));
+  if (!e->obj) { // Failed to allocate StackTraceElement
+    drop_handle(thread, e);
+    return nullptr;
+  }
+
+  cp_method *method = frame->method;
+  obj_header *result = nullptr;
+
+#define E ((struct native_StackTraceElement *)e->obj)
+  // As HotSpot's java_lang_StackTraceElement::fill_in (Shiklo fork, 2026-10-28): the class's binary name with dots,
+  // its module's name ("java.base/java.lang.Integer.parseInt"), no file name when the class has no SourceFile
+  // attribute ("Unknown Source"; it showed the method's name), and -2 for a native method ("Native Method").
+  int line = is_frame_native(frame) ? -2 : get_line_number(method->code, frame->program_counter);
+  object o = (void *)get_class_mirror(thread, method->my_class);
+  if (!o)
+    goto done;
+  E->declaringClassObject = o;
+  obj_header *module = ((struct native_Class *)o)->module;
+  if (module)
+    E->moduleName = LoadFieldObject(module, "java/lang/String", "name"); // null for the unnamed module
+  INIT_STACK_STRING(binary_name, 1024);
+  exchange_slashes_and_dots(&binary_name, method->my_class->name);
+  o = MakeJStringFromModifiedUTF8(thread, binary_name, true);
+  if (!o)
+    goto done;
+  E->declaringClass = o;
+  o = MakeJStringFromModifiedUTF8(thread, method->name, true);
+  if (!o)
+    goto done;
+  E->methodName = o;
+  attribute_source_file *sf = method->my_class->source_file;
+  o = nullptr;
+  if (sf) {
+    o = MakeJStringFromModifiedUTF8(thread, sf->name, true);
+    if (!o)
+      goto done;
+  }
+  E->fileName = o;
+  E->lineNumber = line;
+  result = e->obj;
+#undef E
+
+done:
+  drop_handle(thread, e);
   return result;
 }
 

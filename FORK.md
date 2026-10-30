@@ -82,6 +82,57 @@ THIRD_PARTY_NOTICES.md).
   every such error was a plain IOException: checklist B6b on build 17).
 - 2026-10-29: the main thread runs in a "main" thread group inside "system", as in HotSpot (it was in "system").
   Probe P21.
+- 2026-10-29 (after build 18): the `java.io.File` natives the VM lacked (`natives/share/java/io/UnixFileSystem.c`):
+  `list0` (`File.list`, `listFiles`), `rename0` (`renameTo`), `getSpace0` (1 GiB, 768 MiB free, as statvfs0), and
+  `setPermission0`, `setLastModifiedTime0`, `setReadOnly0`, which report failure (false) as the JDK does when it
+  cannot make the change: the page's file system keeps neither permissions nor settable times. All threw
+  UnsatisfiedLinkError.
+- 2026-10-29: `invokevirtual` of a VarHandle access method uses `MethodHandles.varHandleInvoker` with the call
+  site's type (`vm/bjvm.c`): the exact invoker was called without adapting to the call site, so a char field read into
+  an Object (`"" + vh.getVolatile(o)`) came back as a raw char: AbstractMethodError.
+- 2026-10-30: `ClassLoader.retrieveDirectives` (`natives/share/java/lang/ClassLoader.c`): no command-line assertion
+  switches, the loader's default off. It was missing, so `setDefaultAssertionStatus` (how the Shiklo page's launcher
+  honours `java -ea`), `setClassAssertionStatus` and `setPackageAssertionStatus` threw UnsatisfiedLinkError.
+- 2026-10-30: after a user-defined loader's `loadClass` returns a class, only that loader is recorded as an initiating
+  loader (JVMS 5.3.2; `vm/bjvm.c` `lookup_class`). Every loader from it up its parents to the class's defining loader
+  was recorded, but `loadClass` may return a class from a loader that is not among its parents (a loader whose parent
+  is the platform loader handing out a class of another application loader): the walk went past the bootstrap loader
+  into a null loader and the VM stopped with "remainder by zero".
+- 2026-10-30: StackWalker (`natives/share/java/lang/StackStreamFactory.c`): `callStackWalk`, `fetchStackFrames` and
+  `setContinuation` were missing, so every StackWalker threw UnsatisfiedLinkError, and with it every
+  `java.util.logging` call (a LogRecord finds its caller with one). As HotSpot's stackwalk.cpp: the walk starts below
+  the walker's own frames, leaves out hidden frames unless asked, fills the Java side's buffer and calls back
+  `doStackWalk`; a StackFrameInfo is filled whole (ResolvedMethodName, modifiers, bci, name, descriptor and its
+  StackTraceElement, made by `make_stack_trace_element`, now shared with Throwable).
+- 2026-10-30: `FileOutputStream.write(int)` (one byte; a DataOutputStream or ZipOutputStream straight on a file threw
+  UnsatisfiedLinkError), and FileNotFoundException with the system's reason, "notes.txt (No such file or directory)"
+  (`natives/share/java/io/`, `file-errors.h`).
+- 2026-10-30: `Array.multiNewArray` (`Array.newInstance(int.class, 2, 3)` threw UnsatisfiedLinkError).
+- 2026-10-30: array sizes are checked in 64 bits (`vm/arrays.c`): `new long[Integer.MAX_VALUE]` wrapped around to a
+  small array whose zeroing wrote past it ("memory access out of bounds"); now OutOfMemoryError "Requested array size
+  exceeds VM limit", or "Java heap space" beyond the heap, which the preallocated error now says too (`vm/bjvm.c`).
+- 2026-10-30: a class whose static initializer failed is erroneous (JVMS 5.5): it was marked initialized and usable
+  after its ExceptionInInitializerError; later uses throw NoClassDefFoundError "Could not initialize class X"
+  (`vm/bjvm.c` `initialize_class`, `classdesc.initialization_failed`).
+- 2026-10-30: HotSpot's exception texts: helpful NullPointerExceptions name `String` and `Object` without their
+  package, write `because the return value of "X.m()" is null`, follow casts (`Map.get` unboxed into an int) and
+  number parameters from 1 (`vm/extended_npe_message.c`); ClassCastException gives the classes' modules and loaders
+  ("class java.lang.Integer cannot be cast to class java.lang.String (java.lang.Integer and java.lang.String are in
+  module java.base of loader 'bootstrap')"; the run's and the Shiklo launcher's loaders show as 'app') (`vm/exceptions.c`).
+- 2026-10-30: name lookup and socket addresses initialize `Inet4Address` / `InetSocketAddress` before making one and
+  keep the objects in handles while their constructors run (`natives/share/java/net/InetAddressImpl.c`,
+  `natives/share/sun/nio/ch/Net.c`): on a program's first lookup the address object was too small and its
+  constructor wrote over the next allocation, so `InetAddress.getAllByName("localhost")` threw ArrayStoreException and
+  HttpServer / HttpClient could not start.
+- 2026-10-30: the runtime images carry the JCE jurisdiction policy that `crypto.policy=unlimited` names
+  (`conf/security/policy/unlimited/*.policy`; `build-runtime.sh`, `src/engine.ts`, `verify-runtime-assets.mjs`):
+  javax.crypto could not start ("Can't read cryptographic policy directory"), so Cipher, Mac and KeyGenerator failed.
+- 2026-10-30: `Math.exp`, `log` and `log10` are interpreter intrinsics as `sin` / `pow` (`vm/interpreter2.c`):
+  StrictMath's results are 1 ulp from HotSpot's, so `Math.exp(1)` printed 2.7182818284590455.
+- 2026-10-30: javac's options and notes (TeaVM javac overlay patch 0005, version 5; `TraceJVMCompileRequest.options`):
+  `-Xlint…`, `-g…`, `-parameters`, `--enable-preview` … go through javac's own Arguments (the compiler had no options:
+  no warnings could be turned on, no preview feature tried), and the deferred notes ("Note: Main.java uses unchecked
+  or unsafe operations.") are reported after compiling, as javac does when it closes.
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their
@@ -138,6 +189,6 @@ THIRD_PARTY_NOTICES.md).
   English).
 - 2026-10-28: the runtime build workflow puts the repository's TypeScript first on PATH (emcc's `--emit-tsd`).
 - 2026-10-28: assertions are off by default, as in the JDK (`Class.desiredAssertionStatus0` returned true);
-  `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`).
+  `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`, which works from 2026-10-30).
 - 2026-10-28: `Class.getModifiers()` of a member class comes from its InnerClasses entry (so `static`, `private`,
   `protected` show), and ACC_SUPER is no longer reported (`natives/share/java/lang/Class.c`).

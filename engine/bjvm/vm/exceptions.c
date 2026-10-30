@@ -119,15 +119,72 @@ void raise_array_index_oob_exception(vm_thread *thread, int index, int length) {
   raise_vm_exception(thread, STR("java/lang/ArrayIndexOutOfBoundsException"), complaint);
 }
 
+// Where a class lives, as HotSpot's Klass::class_in_module_of_loader: "module java.base" / "unnamed module", and
+// "loader 'bootstrap'", "loader 'app'" (a named loader), or "loader com.example.MyLoader @1b6d3586". An array lives where
+// its element class does. TraceJVM's run loader and the Shiklo launcher's program loader, both unnamed, load what the
+// JDK's application loader would: they are shown as 'app'. On failure the text stays empty.
+static void describe_class_place(vm_thread *thread, const classdesc *cd, char *module, size_t module_capacity,
+                                 char *loader, size_t loader_capacity) {
+  while (cd->kind == CD_KIND_ORDINARY_ARRAY)
+    cd = cd->one_fewer_dim;
+  snprintf(module, module_capacity, "module java.base");
+  snprintf(loader, loader_capacity, "'bootstrap'");
+  if (cd->kind != CD_KIND_ORDINARY)
+    return; // primitives and their arrays
+  struct native_Class *mirror = get_class_mirror(thread, (classdesc *)cd);
+  if (!mirror)
+    return;
+  heap_string text;
+  obj_header *module_name = mirror->module ? LoadFieldObject(mirror->module, "java/lang/String", "name") : nullptr;
+  if (!module_name) {
+    snprintf(module, module_capacity, "unnamed module");
+  } else if (read_string_to_utf8(thread, &text, module_name) == 0) {
+    snprintf(module, module_capacity, "module %.*s", (int)text.len, text.chars);
+    free_heap_str(text);
+  }
+  obj_header *class_loader = mirror->classLoader;
+  if (!class_loader)
+    return;
+  obj_header *loader_name = ((struct native_ClassLoader *)class_loader)->name;
+  slice loader_class = class_loader->descriptor->name;
+  if (loader_name && read_string_to_utf8(thread, &text, loader_name) == 0) {
+    snprintf(loader, loader_capacity, "'%.*s'", (int)text.len, text.chars);
+    free_heap_str(text);
+  } else if (utf8_equals(loader_class, "$/Run$$Program") || utf8_equals(loader_class, "java/net/FactoryURLClassLoader")) {
+    snprintf(loader, loader_capacity, "'app'");
+  } else {
+    INIT_STACK_STRING(binary_name, 1024);
+    exchange_slashes_and_dots(&binary_name, loader_class);
+    snprintf(loader, loader_capacity, "%.*s @%x", fmt_slice(binary_name), (unsigned)get_object_hash_code(thread->vm, class_loader));
+  }
+}
+
+// HotSpot's message (SharedRuntime::generate_class_cast_message; Shiklo fork, 2026-10-30, was "X cannot be cast to Y"):
+// "class java.lang.Integer cannot be cast to class java.lang.String (java.lang.Integer and java.lang.String are in
+// module java.base of loader 'bootstrap')".
 void raise_class_cast_exception(vm_thread *thread, const classdesc *from, const classdesc *to) {
-  INIT_STACK_STRING(complaint, 1000);
+  INIT_STACK_STRING(complaint, 3000);
   INIT_STACK_STRING(from_str, 1000);
   INIT_STACK_STRING(to_str, 1000);
 
   exchange_slashes_and_dots(&from_str, from->name);
   exchange_slashes_and_dots(&to_str, to->name);
 
-  complaint = bprintf(complaint, "%.*s cannot be cast to %.*s", fmt_slice(from_str), fmt_slice(to_str));
+  char from_module[300], from_loader[300], to_module[300], to_loader[300];
+  describe_class_place(thread, from, from_module, sizeof(from_module), from_loader, sizeof(from_loader));
+  describe_class_place(thread, to, to_module, sizeof(to_module), to_loader, sizeof(to_loader));
+  if (thread->current_exception) // a mirror could not be made
+    return;
+  if (strcmp(from_module, to_module) == 0 && strcmp(from_loader, to_loader) == 0) {
+    complaint = bprintf(complaint, "class %.*s cannot be cast to class %.*s (%.*s and %.*s are in %s of loader %s)",
+                        fmt_slice(from_str), fmt_slice(to_str), fmt_slice(from_str), fmt_slice(to_str), from_module,
+                        from_loader);
+  } else {
+    complaint = bprintf(complaint,
+                        "class %.*s cannot be cast to class %.*s (%.*s is in %s of loader %s; %.*s is in %s of loader %s)",
+                        fmt_slice(from_str), fmt_slice(to_str), fmt_slice(from_str), from_module, from_loader,
+                        fmt_slice(to_str), to_module, to_loader);
+  }
   raise_vm_exception(thread, STR("java/lang/ClassCastException"), complaint);
 }
 

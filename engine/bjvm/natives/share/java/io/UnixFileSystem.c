@@ -187,3 +187,86 @@ DECLARE_NATIVE("java/io", UnixFileSystem, createDirectory0, "(Ljava/io/File;)Z")
 on_oom:
   return (stack_value){.i = 0};
 }
+
+// The java.io.File natives this VM lacked (Shiklo fork, 2026-10-29): list0 (File.list, listFiles), rename0
+// (renameTo), getSpace0, and the ones that change a file's permissions or time. The page's file system keeps neither
+// permissions nor settable times, so those report failure (false), as the JDK does when it cannot make the change.
+
+// File f → its entries' names without "." and "..", or null when it is not a readable folder.
+DECLARE_NATIVE("java/io", UnixFileSystem, list0, "(Ljava/io/File;)[Ljava/lang/String;") {
+  obj_header *file_obj = args[0].handle->obj;
+  if (!file_obj) {
+    raise_null_pointer_exception(thread);
+    return value_null();
+  }
+  obj_header *path = LoadFieldObject(file_obj, "java/lang/String", "path");
+  heap_string path_str = AsHeapString(path, on_oom);
+  tracejvm_host_dir *dir = tracejvm_host_opendir(path_str.chars);
+  free_heap_str(path_str);
+  if (!dir)
+    return value_null();
+  char **names = nullptr;
+  char name[PATH_MAX];
+  while (tracejvm_host_readdir(dir, name, sizeof(name)) > 0) {
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+      continue;
+    arrput(names, strdup(name));
+  }
+  tracejvm_host_closedir(dir);
+
+  handle *result = make_handle(thread, CreateObjectArray1D(thread, cached_classes(thread->vm)->string, arrlen(names)));
+  for (int i = 0; result->obj && i < arrlen(names); ++i) {
+    obj_header *entry = MakeJStringFromModifiedUTF8(thread, str_to_utf8(names[i]), false);
+    if (!entry)
+      break; // out of memory: the exception is pending
+    ReferenceArrayStore(result->obj, i, entry);
+  }
+  obj_header *list = thread->current_exception ? nullptr : result->obj;
+  drop_handle(thread, result);
+  for (int i = 0; i < arrlen(names); ++i)
+    free(names[i]);
+  arrfree(names);
+  return (stack_value){.obj = list};
+
+on_oom:
+  return value_null();
+}
+
+// File f1, File f2
+DECLARE_NATIVE("java/io", UnixFileSystem, rename0, "(Ljava/io/File;Ljava/io/File;)Z") {
+  if (!args[0].handle->obj || !args[1].handle->obj) {
+    raise_null_pointer_exception(thread);
+    return value_null();
+  }
+  obj_header *from = LoadFieldObject(args[0].handle->obj, "java/lang/String", "path");
+  heap_string from_str = AsHeapString(from, on_oom);
+  obj_header *to = LoadFieldObject(args[1].handle->obj, "java/lang/String", "path");
+  heap_string to_str = AsHeapString(to, on_oom_from);
+  int result = tracejvm_host_rename(from_str.chars, to_str.chars) == 0;
+  free_heap_str(to_str);
+  free_heap_str(from_str);
+  return (stack_value){.i = result};
+
+on_oom_from:
+  free_heap_str(from_str);
+on_oom:
+  return (stack_value){.i = 0};
+}
+
+// File f, int t (0 total, 1 free, 2 usable): the page's files are described as 1 GiB with 768 MiB free, as statvfs0.
+DECLARE_NATIVE("java/io", UnixFileSystem, getSpace0, "(Ljava/io/File;I)J") {
+  if (!args[0].handle->obj) {
+    raise_null_pointer_exception(thread);
+    return value_null();
+  }
+  return (stack_value){.l = args[1].i == 0 ? (s64)1 << 30 : (s64)768 << 20};
+}
+
+// File f, int access, boolean enable, boolean owneronly
+DECLARE_NATIVE("java/io", UnixFileSystem, setPermission0, "(Ljava/io/File;IZZ)Z") { return (stack_value){.i = 0}; }
+
+// File f, long time
+DECLARE_NATIVE("java/io", UnixFileSystem, setLastModifiedTime0, "(Ljava/io/File;J)Z") { return (stack_value){.i = 0}; }
+
+// File f
+DECLARE_NATIVE("java/io", UnixFileSystem, setReadOnly0, "(Ljava/io/File;)Z") { return (stack_value){.i = 0}; }

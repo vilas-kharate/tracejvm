@@ -7,6 +7,7 @@
 #include "objects.h"
 
 #include <assert.h>
+#include <exceptions.h>
 #include <linkage.h>
 #include <stdlib.h>
 
@@ -94,6 +95,22 @@ classdesc *get_or_create_array_classdesc(vm_thread *thread, classdesc *classdesc
   return classdesc->array_type;
 }
 
+// Whether an array of count elements of size bytes can be allocated; if not, the OutOfMemoryError HotSpot throws is
+// raised: "Requested array size exceeds VM limit" above its largest length (Integer.MAX_VALUE - 2), else "Java heap
+// space" when it is larger than the whole heap (Shiklo fork, 2026-10-30: count * size was an int, so new
+// long[Integer.MAX_VALUE] wrapped around to a small array and the zeroing wrote past it: "memory access out of bounds").
+static bool array_fits(vm_thread *thread, int count, int size) {
+  if (count > INT32_MAX - 2) {
+    raise_vm_exception(thread, STR("java/lang/OutOfMemoryError"), STR("Requested array size exceeds VM limit"));
+    return false;
+  }
+  if ((u64)kArrayDataOffset + (u64)count * (u64)size > (u64)thread->vm->heap_capacity) {
+    out_of_memory(thread);
+    return false;
+  }
+  return true;
+}
+
 // Create a 1D primitive array of the given type and size.
 static object create_1d_primitive_array(vm_thread *thread, type_kind array_type, int count) {
   DCHECK(count >= 0);
@@ -101,12 +118,14 @@ static object create_1d_primitive_array(vm_thread *thread, type_kind array_type,
   int size = sizeof_type_kind(array_type);
   classdesc *array_desc = get_or_create_array_classdesc(thread, primitive_classdesc(thread, array_type));
   DCHECK(array_desc);
+  if (!array_fits(thread, count, size))
+    return nullptr;
 
-  size_t allocation_size = kArrayDataOffset + count * size;
+  size_t allocation_size = kArrayDataOffset + (size_t)count * size;
   obj_header *array = AllocateObject(thread, array_desc, allocation_size);
   if (array) {
     *(int *)((char *)array + kArrayLengthOffset) = count;
-    memset(ArrayData(array), 0, count * size); // zero initialize
+    memset(ArrayData(array), 0, (size_t)count * size); // zero initialize
     DCHECK(size_of_object(array) == allocation_size);
   }
 
@@ -120,8 +139,10 @@ obj_header *CreateObjectArray1D(vm_thread *thread, classdesc *cd, int count) {
 
   classdesc *array_desc = get_or_create_array_classdesc(thread, cd);
   DCHECK(array_desc);
+  if (!array_fits(thread, count, sizeof(object)))
+    return nullptr;
 
-  size_t allocation_size = kArrayDataOffset + count * sizeof(object);
+  size_t allocation_size = kArrayDataOffset + (size_t)count * sizeof(object);
   obj_header *array = AllocateObject(thread, array_desc, allocation_size);
   if (array) {
     *(int *)((char *)array + kArrayLengthOffset) = count;

@@ -8,6 +8,7 @@ patches=(
   "$repo_root/compiler/teavm-javac/patches/0002-nested-source-paths.patch"
   "$repo_root/compiler/teavm-javac/patches/0003-platform-archive.patch"
   "$repo_root/compiler/teavm-javac/patches/0004-shiklo-float-constants.patch"
+  "$repo_root/compiler/teavm-javac/patches/0005-shiklo-javac-options.patch"
 )
 cache_root="$repo_root/.cache/teavm-javac"
 output_root="$cache_root/artifacts"

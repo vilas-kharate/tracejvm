@@ -1,5 +1,6 @@
 #include "bjvm.h"
 #include <arrays.h>
+#include <linkage.h>
 #include <natives-dsl.h>
 
 DECLARE_NATIVE("java/lang/reflect", Array, newArray, "(Ljava/lang/Class;I)Ljava/lang/Object;") {
@@ -18,6 +19,39 @@ DECLARE_NATIVE("java/lang/reflect", Array, newArray, "(Ljava/lang/Class;I)Ljava/
     result = CreateObjectArray1D(thread, class, count);
   }
   return (stack_value){.obj = result};
+}
+
+// Class componentType, int[] dimensions: Array.newInstance with several dimensions, as HotSpot's
+// Reflection::reflect_new_multi_array (Shiklo fork, 2026-10-30; it was missing: UnsatisfiedLinkError).
+DECLARE_NATIVE("java/lang/reflect", Array, multiNewArray, "(Ljava/lang/Class;[I)Ljava/lang/Object;") {
+  if (!args[0].handle->obj || !args[1].handle->obj) {
+    raise_null_pointer_exception(thread);
+    return value_null();
+  }
+  int dims = ArrayLength(args[1].handle->obj);
+  classdesc *type = unmirror_class(args[0].handle->obj);
+  int existing = type->kind == CD_KIND_ORDINARY_ARRAY || type->kind == CD_KIND_PRIMITIVE_ARRAY ? type->dimensions : 0;
+  if (dims == 0 || dims + existing > kArrayMaxDimensions ||
+      (type->kind == CD_KIND_PRIMITIVE && type->primitive_component == TYPE_KIND_VOID)) {
+    raise_vm_exception(thread, STR("java/lang/IllegalArgumentException"),
+                       dims == 0 ? STR("Empty dimensions array") : STR("Wrong number of dimensions"));
+    return value_null();
+  }
+  int sizes[kArrayMaxDimensions];
+  for (int i = 0; i < dims; ++i) {
+    sizes[i] = ((int *)ArrayData(args[1].handle->obj))[i];
+    if (sizes[i] < 0) {
+      raise_negative_array_size_exception(thread, sizes[i]);
+      return value_null();
+    }
+  }
+  if (type->kind != CD_KIND_PRIMITIVE)
+    link_class(thread, type);
+  for (int i = 0; i < dims; ++i) {
+    get_or_create_array_classdesc(thread, type);
+    type = type->array_type;
+  }
+  return (stack_value){.obj = CreateArray(thread, type, sizes, dims)};
 }
 
 DECLARE_NATIVE("java/lang/reflect", Array, getLength, "(Ljava/lang/Object;)I") {

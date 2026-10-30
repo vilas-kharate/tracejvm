@@ -1,3 +1,4 @@
+#include "file-errors.h"
 #include <natives-dsl.h>
 #include <tracejvm-host.h>
 
@@ -40,10 +41,8 @@ DECLARE_NATIVE("java/io", RandomAccessFile, open0, "(Ljava/lang/String;I)V") {
   int flags = (mode & 2) ? O_RDWR | O_CREAT : O_RDONLY;
   int fd = tracejvm_host_open(filename.chars, flags, 0666);
   StoreFieldInt(random_access_fd(obj->obj), "fd", fd);
-  if (fd < 0) {
-    raise_vm_exception(
-        thread, STR("java/io/FileNotFoundException"), hslc(filename));
-  }
+  if (fd < 0)
+    raise_file_not_found(thread, filename, errno);
   free_heap_str(filename);
 
 on_oom:

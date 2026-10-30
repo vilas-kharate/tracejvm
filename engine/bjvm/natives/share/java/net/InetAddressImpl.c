@@ -26,6 +26,16 @@ static stack_value loopback_addresses(vm_thread *thread, handle *host) {
   classdesc *inet = bootstrap_lookup_class(thread, STR("java/net/InetAddress"));
   if (!inet4 || !inet)
     return value_null();
+  // Initialized (so linked) before an instance is made, as the bytecode `new` does (2026-10-30: on a program's first
+  // lookup Inet4Address had no field layout yet, the object was too small and its constructor wrote over the next
+  // allocation: getAllByName("localhost") threw ArrayStoreException, so HttpServer and HttpClient could not start).
+  initialize_class_t init = {.args = {thread, inet4}};
+  thread->stack.synchronous_depth++;
+  future_t initialized = initialize_class(&init);
+  thread->stack.synchronous_depth--;
+  CHECK(initialized.status == FUTURE_READY);
+  if (thread->current_exception)
+    return value_null();
   handle *address = make_handle(thread, new_object(thread, inet4));
   cp_method *constructor = method_lookup(inet4, STR("<init>"), STR("(Ljava/lang/String;I)V"), true, false);
   call_interpreter_synchronous(

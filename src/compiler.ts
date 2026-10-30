@@ -62,6 +62,8 @@ interface TeaVMListenerRegistration {
 }
 
 interface TeaVMCompiler {
+  /** javac's options, one per line (compiler overlay patch 0005). */
+  setOptions(lines: string): void;
   addSourceFile(path: string, content: string): void;
   clearSourceFiles(): void;
   addClassFile(path: string, content: Int8Array): void;
@@ -218,6 +220,13 @@ export class TraceJVMCompiler {
       compiler.clearSourceFiles();
       compiler.clearInputClassFiles();
       compiler.clearOutputFiles();
+      const options = request.options ?? [];
+      for (const option of options) {
+        if (typeof option !== "string" || option.length === 0 || /[\r\n]/u.test(option)) {
+          throw new TypeError("javac options must be non-empty strings without line breaks.");
+        }
+      }
+      compiler.setOptions(options.join("\n"));
       for (const source of request.sources) {
         validateRelativePath(source.path, "Java source");
         compiler.addSourceFile(source.path, source.content);

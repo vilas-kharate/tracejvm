@@ -1,3 +1,4 @@
+#include "file-errors.h"
 #include <natives-dsl.h>
 #include <tracejvm-host.h>
 #ifdef EMSCRIPTEN
@@ -22,13 +23,28 @@ DECLARE_NATIVE("java/io", FileOutputStream, open0, "(Ljava/lang/String;Z)V") {
   int flags = O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC);
   s32 unix_fd = tracejvm_host_open(filename.chars, flags, 0666);
   StoreFieldInt(fd, "fd", unix_fd);
-  if (unix_fd < 0) {
-    raise_vm_exception(thread, STR("java/io/FileNotFoundException"), hslc(filename));
-  }
+  if (unix_fd < 0)
+    raise_file_not_found(thread, filename, errno);
   free_heap_str(filename);
   return value_null();
 
 on_oom:
+  return value_null();
+}
+
+// int b, boolean append: one byte (Shiklo fork, 2026-10-30; it was missing, so FileOutputStream.write(int) threw
+// UnsatisfiedLinkError: a DataOutputStream or ZipOutputStream straight on a file).
+DECLARE_NATIVE("java/io", FileOutputStream, write, "(IZ)V") {
+  obj_header *fd = LoadFieldObject(obj->obj, "java/io/FileDescriptor", "fd");
+  s32 unix_fd = LoadFieldInt(fd, "fd");
+  char byte = (char)args[0].i;
+  if (unix_fd == 1 && thread->vm->write_stdout && !tracejvm_host_routes_fd(unix_fd)) {
+    thread->vm->write_stdout(&byte, 1, thread->vm->stdio_override_param);
+  } else if (unix_fd == 2 && thread->vm->write_stderr && !tracejvm_host_routes_fd(unix_fd)) {
+    thread->vm->write_stderr(&byte, 1, thread->vm->stdio_override_param);
+  } else if (tracejvm_host_write(unix_fd, &byte, 1, 0, false) != 1) {
+    raise_vm_exception(thread, STR("java/io/IOException"), STR("Error writing file"));
+  }
   return value_null();
 }
 

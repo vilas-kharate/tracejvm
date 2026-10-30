@@ -850,6 +850,17 @@ static void init_unsafe_constants(vm_thread *thread) {
 
 #define PROFILE_STARTUP 0 // if 1, prints out profiler data for startup
 
+// The thread's preallocated OutOfMemoryError, thrown when the heap is full: "Java heap space", as HotSpot's (Shiklo
+// fork, 2026-10-30; it had no message). The message is held by a handle while the error is allocated.
+static obj_header *make_heap_space_error(vm_thread *thr) {
+  handle *message = make_handle(thr, MakeJStringFromModifiedUTF8(thr, STR("Java heap space"), false));
+  obj_header *error = new_object(thr, cached_classes(thr->vm)->oom_error);
+  if (error)
+    ((struct native_Throwable *)error)->detailMessage = message->obj;
+  drop_handle(thr, message);
+  return error;
+}
+
 vm_thread *create_main_thread(vm *vm, thread_options options) {
   vm_thread *thr = calloc(1, sizeof(vm_thread));
   arrput(vm->active_threads, thr);
@@ -883,7 +894,7 @@ vm_thread *create_main_thread(vm *vm, thread_options options) {
   }
 
   // Pre-allocate OOM and stack overflow errors
-  thr->out_of_mem_error = new_object(thr, cached_classes(vm)->oom_error);
+  thr->out_of_mem_error = make_heap_space_error(thr);
   thr->stack_overflow_error = new_object(thr, cached_classes(vm)->stack_overflow_error);
 
   handle *java_thread = make_handle(thr, new_object(thr, cached_classes(vm)->thread));
@@ -999,7 +1010,7 @@ vm_thread *create_vm_thread(vm *vm, vm_thread *creator_thread, struct native_Thr
   }
 
   // Pre-allocate OOM and stack overflow errors
-  thr->out_of_mem_error = new_object(thr, cached_classes(vm)->oom_error);
+  thr->out_of_mem_error = make_heap_space_error(thr);
   thr->stack_overflow_error = new_object(thr, cached_classes(vm)->stack_overflow_error);
 
   thr->thread_obj = (struct native_Thread *)java_thread->obj;
@@ -1673,14 +1684,15 @@ DEFINE_ASYNC(lookup_class) {
     (void)hash_table_delete(&thread->vm->inchoate_classes, classname.chars, (int)classname.len);
 
     if (class) {
-      // Mark all class loaders in the chain from the current class loader to the defining class loader as being
-      // an initiating loader of C
-      classloader *curr = cl;
+      // "L is recorded as an initiating loader of C" (JVMS 5.3.2), the loader that was asked. (Shiklo fork,
+      // 2026-10-30: every loader from L up its parents to C's defining loader was recorded, but loadClass may get C
+      // from a loader that is not among L's parents, e.g. a loader whose parent is the platform loader handing out a
+      // class of another application loader: the walk ran past the bootstrap loader into a null loader and the VM
+      // stopped with "remainder by zero".)
       DCHECK(class->classloader);
-      while (curr != class->classloader) {
-        classdesc *existing = hash_table_insert(&curr->initiating, classname.chars, (int)classname.len, class);
+      if (cl != class->classloader) {
+        classdesc *existing = hash_table_insert(&cl->initiating, classname.chars, (int)classname.len, class);
         DCHECK(existing == nullptr || existing == class);
-        curr = curr->parent;
       }
     }
   }
@@ -1834,6 +1846,16 @@ void wrap_in_exception_in_initializer_error(vm_thread *thread) {
 
 // Call <clinit> on the class, if it hasn't already been called.
 // NOLINTNEXTLINE(misc-no-recursion)
+// A class whose initialization failed is used again: NoClassDefFoundError "Could not initialize class Main$Broken", as
+// HotSpot (JVMS 5.5 step 5; Shiklo fork, 2026-10-30).
+static void raise_could_not_initialize(vm_thread *thread, classdesc *cd) {
+  INIT_STACK_STRING(message, 1100);
+  INIT_STACK_STRING(binary_name, 1024);
+  exchange_slashes_and_dots(&binary_name, cd->name);
+  message = bprintf(message, "Could not initialize class %.*s", fmt_slice(binary_name));
+  raise_vm_exception(thread, STR("java/lang/NoClassDefFoundError"), message);
+}
+
 DEFINE_ASYNC(initialize_class) {
 #define thread (args->thread)
 
@@ -1847,6 +1869,10 @@ DEFINE_ASYNC(initialize_class) {
               // awaits
 
   DCHECK(cd);
+  if (unlikely(cd->initialization_failed)) {
+    raise_could_not_initialize(thread, cd);
+    ASYNC_RETURN(-1);
+  }
   if (likely(cd->state == CD_STATE_INITIALIZED || cd->state == CD_STATE_LINKAGE_ERROR)) {
     // Class is already initialized
     ASYNC_RETURN(0);
@@ -1875,6 +1901,10 @@ DEFINE_ASYNC(initialize_class) {
       cd = args->classdesc; // reload!
     }
 
+    if (cd->initialization_failed) { // the other thread's <clinit> threw
+      raise_could_not_initialize(thread, cd);
+      ASYNC_RETURN(-1);
+    }
     ASYNC_RETURN(0); // the class is done
   }
 
@@ -1922,8 +1952,12 @@ DEFINE_ASYNC(initialize_class) {
   if (clinit) {
 
     AWAIT(call_interpreter, thread, clinit, nullptr);
-    if (thread->current_exception && !is_error(thread->current_exception->descriptor)) {
-      wrap_in_exception_in_initializer_error(thread);
+    if (thread->current_exception) {
+      // The class is erroneous (JVMS 5.5 step 11-12; Shiklo fork, 2026-10-30: error stayed 0 and the class was marked
+      // initialized, so it could be used after its ExceptionInInitializerError).
+      if (!is_error(thread->current_exception->descriptor))
+        wrap_in_exception_in_initializer_error(thread);
+      error = 1;
       goto done;
     }
   }
@@ -1931,6 +1965,8 @@ DEFINE_ASYNC(initialize_class) {
   error = 0;
 done:
   free(self->recursive_call_space);
+  if (error) // its <clinit>, or a superclass's or superinterface's, threw
+    args->classdesc->initialization_failed = true;
   args->classdesc->state = error ? CD_STATE_LINKAGE_ERROR : CD_STATE_INITIALIZED;
   args->classdesc->linkage_error = thread->current_exception;
   // Mark all array classes with the same state
@@ -2448,37 +2484,21 @@ doit:
 
     self->result = make_handle(thread, get_async_result(call_interpreter).obj);
 
-    // Second, a reference to an instance of java.lang.invoke.MethodType is obtained as if by invocation of the
-    // accessModeType method of java.lang.invoke.VarHandle on the instance objectref, with the instance of
-    // java.lang.invoke.VarHandle.AccessMode as the argument.
-    cp_method *accessModeType =
-        method_lookup(self->vh->obj->descriptor, STR("accessModeType"),
-                      STR("(Ljava/lang/invoke/VarHandle$AccessMode;)Ljava/lang/invoke/MethodType;"), true, false);
-    DCHECK(accessModeType);
-
-    // Now invoke it with the result of the previous call
-    stack_value arg2[] = {{.obj = (void *)self->vh->obj}, {.obj = self->result->obj}};
-    AWAIT(call_interpreter, thread, accessModeType, arg2);
-    if (thread->current_exception) {
-      drop_handle(thread, self->vh);
-      drop_handle(thread, self->result);
-      ASYNC_RETURN_VOID();
-    }
-
-    // Third, a reference to an instance of java.lang.invoke.MethodHandle is obtained as if by invocation of the
-    // varHandleExactInvoker method of java.lang.invoke.MethodHandles with the instance of
-    // java.lang.invoke.VarHandle.AccessMode as the first argument and the instance of java.lang.invoke.MethodType
-    // as the second argument. The resulting instance is called the invoker method handle.
+    // Then the invoker method handle: MethodHandles.varHandleInvoker with the access mode and the call site's type. The
+    // JVMS invokes the exact invoker (of the access mode's own type) as MethodHandle.invoke does, adapting it to the
+    // call site; this invoker does that adaptation (boxing, unboxing, widening) itself. (Shiklo fork, 2026-10-29: the
+    // exact invoker was called without it, so a char field read into an Object, as in "" + vh.getVolatile(o), came
+    // back as a raw char: AbstractMethodError.)
     classdesc *MethodHandles = cached_classes(thread->vm)->method_handles;
     CHECK(MethodHandles);
-    stack_value arg3[] = {{.obj = self->result->obj}, {.obj = get_async_result(call_interpreter).obj}};
-    cp_method *varHandleExactInvoker =
-        method_lookup(MethodHandles, STR("varHandleExactInvoker"),
+    stack_value arg3[] = {{.obj = self->result->obj}, {.obj = (void *)provider_mt}};
+    cp_method *varHandleInvoker =
+        method_lookup(MethodHandles, STR("varHandleInvoker"),
                       STR("(Ljava/lang/invoke/VarHandle$AccessMode;Ljava/lang/invoke/MethodType;)"
                           "Ljava/lang/invoke/MethodHandle;"),
                       true, false);
-    DCHECK(varHandleExactInvoker);
-    AWAIT(call_interpreter, thread, varHandleExactInvoker, arg3);
+    DCHECK(varHandleInvoker);
+    AWAIT(call_interpreter, thread, varHandleInvoker, arg3);
     if (thread->current_exception) {
       drop_handle(thread, self->vh);
       drop_handle(thread, self->result);

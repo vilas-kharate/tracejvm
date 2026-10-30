@@ -46,6 +46,11 @@ export interface TraceJVMCompileRequest {
   sources: readonly TraceJVMSourceFile[];
   /** JARs or compiled class files made visible to javac. */
   classpath?: readonly TraceJVMBinaryFile[];
+  /**
+   * javac's options, as on its command line: -Xlint:all, -g, -parameters, --enable-preview … (Shiklo fork,
+   * 2026-10-30).
+   */
+  options?: readonly string[];
   signal?: AbortSignal;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
@@ -680,6 +685,9 @@ async function loadOperatingSystem(
       ...TRACEKERNEL_API_RUNTIME_FILES,
       "jdk23/lib/tzdb.dat",
       "jdk23/lib/module-packages.map",
+      // javax.crypto's jurisdiction policy (Shiklo fork, 2026-10-30).
+      "jdk23/conf/security/policy/unlimited/default_US_export.policy",
+      "jdk23/conf/security/policy/unlimited/default_local.policy",
       ...(profile === "core"
         ? []
         : ["jdk23/conf/logging.properties"]),

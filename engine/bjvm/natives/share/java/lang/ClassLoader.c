@@ -1,3 +1,4 @@
+#include <linkage.h>
 #include <natives-dsl.h>
 
 DECLARE_NATIVE("java/lang", ClassLoader, registerNatives, "()V") { return value_null(); }
@@ -33,6 +34,31 @@ on_oom:
 
 DECLARE_NATIVE("java/lang", ClassLoader, findBuiltinLib, "(Ljava/lang/String;)Ljava/lang/String;") {
   return value_null();
+}
+
+// The command line's assertion switches (Shiklo fork, 2026-10-30): none, so every class and package follows the
+// loader's default, off as in the JDK. It was missing, so the first ClassLoader.setDefaultAssertionStatus (how the
+// launcher honours `java -ea`), setClassAssertionStatus or setPackageAssertionStatus threw UnsatisfiedLinkError.
+DECLARE_NATIVE("java/lang", ClassLoader, retrieveDirectives, "()Ljava/lang/AssertionStatusDirectives;") {
+  classdesc *Directives = bootstrap_lookup_class(thread, STR("java/lang/AssertionStatusDirectives"));
+  if (!Directives)
+    return value_null();
+  link_class(thread, Directives);
+  handle *result = make_handle(thread, new_object(thread, Directives));
+  // Each empty array is made before result->obj is read: an allocation may move the object.
+  for (int i = 0; result->obj && i < 4 && !thread->current_exception; ++i) {
+    obj_header *empty = i % 2 == 0 ? CreateObjectArray1D(thread, cached_classes(thread->vm)->string, 0)
+                                   : CreatePrimitiveArray1D(thread, TYPE_KIND_BOOLEAN, 0);
+    if (!empty)
+      break; // out of memory: the exception is pending
+    static const char *names[] = {"classes", "classEnabled", "packages", "packageEnabled"};
+    __StoreFieldObject(result->obj, i % 2 == 0 ? STR("[Ljava/lang/String;") : STR("[Z"), str_to_utf8(names[i]), empty);
+  }
+  if (result->obj && !thread->current_exception)
+    StoreFieldBoolean(result->obj, "deflt", false);
+  obj_header *directives = thread->current_exception ? nullptr : result->obj;
+  drop_handle(thread, result);
+  return (stack_value){.obj = directives};
 }
 
 static int incr = 0;

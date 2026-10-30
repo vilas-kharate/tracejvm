@@ -26,6 +26,8 @@ const expectedProfileFiles = [
   "jdk23.jar",
   "jdk23/conf/security/java.policy",
   "jdk23/conf/security/java.security",
+  "jdk23/conf/security/policy/unlimited/default_US_export.policy",
+  "jdk23/conf/security/policy/unlimited/default_local.policy",
   "jdk23/lib/modules",
   "jdk23/lib/module-packages.map",
   "jdk23/lib/security/default.policy",

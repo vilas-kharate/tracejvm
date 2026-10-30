@@ -1898,6 +1898,14 @@ static int intrinsify(vm_thread *thread, bytecode_insn *inst) {
       inst->kind = insn_cos;
     } else if (utf8_equals(method->name, "tan")) {
       inst->kind = insn_tan;
+    } else if (utf8_equals(method->name, "exp")) {
+      // As HotSpot's intrinsics (Shiklo fork, 2026-10-30): StrictMath's fdlibm result is 1 ulp from them, so
+      // Math.exp(1) printed 2.7182818284590455 instead of 2.718281828459045.
+      inst->kind = insn_exp;
+    } else if (utf8_equals(method->name, "log")) {
+      inst->kind = insn_log;
+    } else if (utf8_equals(method->name, "log10")) {
+      inst->kind = insn_log10;
     } else {
       return 0;
     }
@@ -2868,6 +2876,21 @@ static s64 sqrt_impl_double(ARGS_DOUBLE) {
   NEXT_DOUBLE(sqrt(tos))
 }
 
+static s64 exp_impl_double(ARGS_DOUBLE) {
+  DEBUG_CHECK();
+  NEXT_DOUBLE(exp(tos))
+}
+
+static s64 log_impl_double(ARGS_DOUBLE) {
+  DEBUG_CHECK();
+  NEXT_DOUBLE(log(tos))
+}
+
+static s64 log10_impl_double(ARGS_DOUBLE) {
+  DEBUG_CHECK();
+  NEXT_DOUBLE(log10(tos))
+}
+
 static s64 sqrt_impl_float(ARGS_FLOAT) {
   DEBUG_CHECK();
   NEXT_FLOAT(sqrt(tos))
@@ -3577,6 +3600,9 @@ PAGE_ALIGN static s64 (*jmp_table_double[MAX_INSN_KIND])(ARGS_VOID) = {
     [insn_cos] = cos_impl_double,
     [insn_tan] = tan_impl_double,
     [insn_sqrt] = sqrt_impl_double,
+    [insn_exp] = exp_impl_double,
+    [insn_log] = log_impl_double,
+    [insn_log10] = log10_impl_double,
     [insn_hot_aot] = hot_aot_impl_double,
     [insn_hot_arrays_support_unsigned_hash_code] = hot_arrays_support_unsigned_hash_code_impl_double,
     [insn_hot_string_latin1_equals] = hot_string_latin1_equals_impl_double};

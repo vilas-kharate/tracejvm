@@ -231,6 +231,13 @@ PYTHON
     "$profile_runtime_root/jdk23/conf/security/java.security"
   cp "$linux_home/conf/security/java.policy" \
     "$profile_runtime_root/jdk23/conf/security/java.policy"
+  # The JCE jurisdiction policy that java.security's crypto.policy=unlimited names (Shiklo fork, 2026-10-30): without
+  # it javax.crypto could not start ("Can't read cryptographic policy directory"): Cipher, Mac and KeyGenerator failed.
+  mkdir -p "$profile_runtime_root/jdk23/conf/security/policy/unlimited"
+  for policy in default_US_export.policy default_local.policy; do
+    cp "$linux_home/conf/security/policy/unlimited/$policy" \
+      "$profile_runtime_root/jdk23/conf/security/policy/unlimited/$policy"
+  done
   if [[ "$profile" != "core" ]]; then
     cp "$linux_home/conf/logging.properties" \
       "$profile_runtime_root/jdk23/conf/logging.properties"

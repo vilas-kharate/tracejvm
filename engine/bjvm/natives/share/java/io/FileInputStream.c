@@ -1,3 +1,4 @@
+#include "file-errors.h"
 #include <errno.h>
 #include <limits.h>
 #include <natives-dsl.h>
@@ -25,10 +26,8 @@ DECLARE_NATIVE("java/io", FileInputStream, open0, "(Ljava/lang/String;)V") {
   s32 unix_fd = tracejvm_host_open(filename.chars, O_RDONLY, 0);
   StoreFieldInt(fd, "fd", unix_fd);
 
-  if (unix_fd < 0) {
-    // TODO use errno to give a better error message
-    raise_vm_exception(thread, STR("java/io/FileNotFoundException"), hslc(filename));
-  }
+  if (unix_fd < 0)
+    raise_file_not_found(thread, filename, errno);
 
   free_heap_str(filename);
   return value_null();

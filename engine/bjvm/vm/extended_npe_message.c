@@ -8,11 +8,21 @@ static void replace_slashes(char *str, int len) {
   }
 }
 
+// A class's name as HotSpot's ExceptionMessageBuilder::print_klass_name writes it: dots, and java.lang.Object and
+// java.lang.String without their package ("String.length()", "java.util.Map.get(Object)") (Shiklo fork, 2026-10-30).
+static void npe_append_class_name(string_builder *B, slice name) {
+  if (utf8_equals(name, "java/lang/Object") || utf8_equals(name, "java/lang/String")) {
+    string_builder_append(B, "%.*s", (int)name.len - 10, name.chars + 10);
+    return;
+  }
+  string_builder_append(B, "%.*s", fmt_slice(name));
+  replace_slashes(B->data + B->write_pos - name.len, name.len);
+}
+
 static void npe_stringify_type(string_builder *B, const field_descriptor *F) {
   switch (F->base_kind) {
   case TYPE_KIND_REFERENCE:
-    string_builder_append(B, "%.*s", fmt_slice(F->class_name));
-    replace_slashes(B->data + B->write_pos - F->class_name.len, F->class_name.len);
+    npe_append_class_name(B, F->class_name);
     break;
   default:
     string_builder_append(B, "%s", type_kind_to_string(F->base_kind));
@@ -23,9 +33,8 @@ static void npe_stringify_type(string_builder *B, const field_descriptor *F) {
 }
 
 static void npe_stringify_method(string_builder *B, const cp_method_info *M) {
-  INIT_STACK_STRING(no_slashes, 1024);
-  exchange_slashes_and_dots(&no_slashes, M->class_info->name);
-  string_builder_append(B, "%.*s.%.*s(", fmt_slice(no_slashes), fmt_slice(M->nat->name));
+  npe_append_class_name(B, M->class_info->name);
+  string_builder_append(B, ".%.*s(", fmt_slice(M->nat->name));
   for (int i = 0; i < M->descriptor->args_count; ++i) {
     if (i > 0)
       string_builder_append(B, ", ");
@@ -50,7 +59,13 @@ static int extended_npe_phase2(const cp_method *method, stack_variable_source *s
       if (lvt && ((ent = local_variable_table_lookup(source->index, original_pc, lvt)))) {
         string_builder_append(builder, "%.*s", fmt_slice(*ent));
       } else {
-        string_builder_append(builder, "<parameter%d>", source->index);
+        // As HotSpot: parameters are numbered from 1, a long or double taking two slots (it printed the slot).
+        int slot = method->access_flags & ACCESS_STATIC ? 0 : 1, number = 1;
+        for (int i = 0; method->descriptor && i < method->descriptor->args_count && slot < source->index; ++i, ++number) {
+          field_descriptor *arg = method->descriptor->args + i;
+          slot += !arg->dimensions && (arg->base_kind == TYPE_KIND_LONG || arg->base_kind == TYPE_KIND_DOUBLE) ? 2 : 1;
+        }
+        string_builder_append(builder, "<parameter%d>", number);
       }
     }
     break;
@@ -95,10 +110,14 @@ static int extended_npe_phase2(const cp_method *method, stack_variable_source *s
     case insn_getstatic:
     case insn_getstatic_B ... insn_getstatic_L: {
       // Class.name
-      string_builder_append(builder, "%.*s.%.*s", fmt_slice(insn->cp->field.class_info->name),
-                            fmt_slice(insn->cp->field.nat->name));
+      npe_append_class_name(builder, insn->cp->field.class_info->name);
+      string_builder_append(builder, ".%.*s", fmt_slice(insn->cp->field.nat->name));
       break;
     }
+    case insn_checkcast:
+    case insn_checkcast_resolved:
+      // A cast passes its operand on: the null came from there (Map.get(...) unboxed into an int).
+      return extended_npe_phase2(method, &analy->sources[index].a, index, builder, is_first);
     case insn_invokevirtual:
     case insn_invokeinterface:
     case insn_invokespecial:
@@ -207,7 +226,15 @@ int get_extended_npe_message(cp_method *method, u16 pc, heap_string *result) {
 
   int phase2_fail = extended_npe_phase2(method, &analy->sources[pc].a, pc, &phase2_builder, true);
   if (!phase2_fail) {
-    string_builder_append(&builder, " because \"%.*s\" is null", phase2_builder.write_pos, phase2_builder.data);
+    // As HotSpot: because the return value of "Main$Box.label()" is null; because "Main.name" is null.
+    static const char returned[] = "the return value of ";
+    int prefix = sizeof(returned) - 1;
+    if (phase2_builder.write_pos > prefix && memcmp(phase2_builder.data, returned, prefix) == 0) {
+      string_builder_append(&builder, " because %s\"%.*s\" is null", returned, phase2_builder.write_pos - prefix,
+                            phase2_builder.data + prefix);
+    } else {
+      string_builder_append(&builder, " because \"%.*s\" is null", phase2_builder.write_pos, phase2_builder.data);
+    }
   }
 
   *result = make_heap_str_from((slice){builder.data, builder.write_pos});

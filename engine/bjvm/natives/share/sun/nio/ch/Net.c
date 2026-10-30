@@ -67,7 +67,42 @@ static bool inet4_host(obj_header *address, char *host, size_t capacity) {
   return true;
 }
 
-static obj_header *make_inet4_address(
+// A new instance of a JDK class, constructed with the given arguments (args[0] is filled in), held by a handle the
+// caller drops; null when an exception is pending. The class is initialized first, as the bytecode `new` does, and
+// the object is kept in a handle while its constructor runs Java code (Shiklo fork, 2026-10-30: both were missing, so
+// the first Inet4Address was too small and a collection during a constructor left a stale pointer).
+static classdesc *initialized_class(vm_thread *thread, slice class_name) {
+  classdesc *type = bootstrap_lookup_class(thread, class_name);
+  if (!type)
+    return nullptr;
+  initialize_class_t init = {.args = {thread, type}};
+  thread->stack.synchronous_depth++;
+  future_t initialized = initialize_class(&init);
+  thread->stack.synchronous_depth--;
+  CHECK(initialized.status == FUTURE_READY);
+  return thread->current_exception ? nullptr : type;
+}
+
+static handle *construct(vm_thread *thread, slice class_name, slice descriptor, stack_value *args) {
+  classdesc *type = initialized_class(thread, class_name);
+  if (!type)
+    return nullptr;
+  handle *object = make_handle(thread, new_object(thread, type));
+  if (!object->obj) {
+    drop_handle(thread, object);
+    return nullptr;
+  }
+  args[0].obj = object->obj;
+  cp_method *constructor = method_lookup(type, STR("<init>"), descriptor, true, false);
+  call_interpreter_synchronous(thread, constructor, args);
+  if (thread->current_exception) {
+    drop_handle(thread, object);
+    return nullptr;
+  }
+  return object;
+}
+
+static handle *make_inet4_address(
     vm_thread *thread, char const *host) {
   unsigned int a, b, c, d;
   char trailing;
@@ -76,32 +111,41 @@ static obj_header *make_inet4_address(
     errno = EAFNOSUPPORT;
     return nullptr;
   }
-  classdesc *type =
-      bootstrap_lookup_class(thread, STR("java/net/Inet4Address"));
-  obj_header *address = new_object(thread, type);
-  cp_method *constructor = method_lookup(
-      type, STR("<init>"), STR("(Ljava/lang/String;I)V"), true, false);
   int value = (int)((a << 24) | (b << 16) | (c << 8) | d);
-  call_interpreter_synchronous(
-      thread, constructor,
-      (stack_value[]){{.obj = address}, {.obj = nullptr}, {.i = value}});
-  return thread->current_exception ? nullptr : address;
+  return construct(thread, STR("java/net/Inet4Address"), STR("(Ljava/lang/String;I)V"),
+                   (stack_value[]){{.obj = nullptr}, {.obj = nullptr}, {.i = value}});
+}
+
+// The address as a native's return value (null if it could not be made).
+static stack_value inet4_address_value(vm_thread *thread, char const *host) {
+  handle *address = make_inet4_address(thread, host);
+  if (!address)
+    return value_null();
+  obj_header *result = address->obj;
+  drop_handle(thread, address);
+  return (stack_value){.obj = result};
 }
 
 static obj_header *make_inet_socket_address(
     vm_thread *thread, char const *host, int port) {
-  obj_header *address = make_inet4_address(thread, host);
+  handle *address = make_inet4_address(thread, host);
   if (!address)
     return nullptr;
-  classdesc *type =
-      bootstrap_lookup_class(thread, STR("java/net/InetSocketAddress"));
-  obj_header *socket_address = new_object(thread, type);
-  cp_method *constructor = method_lookup(
-      type, STR("<init>"), STR("(Ljava/net/InetAddress;I)V"), true, false);
-  call_interpreter_synchronous(
-      thread, constructor,
-      (stack_value[]){{.obj = socket_address}, {.obj = address}, {.i = port}});
-  return thread->current_exception ? nullptr : socket_address;
+  obj_header *result = nullptr;
+  classdesc *type = initialized_class(thread, STR("java/net/InetSocketAddress"));
+  if (type) {
+    handle *socket_address = make_handle(thread, new_object(thread, type));
+    if (socket_address->obj) {
+      cp_method *constructor = method_lookup(type, STR("<init>"), STR("(Ljava/net/InetAddress;I)V"), true, false);
+      call_interpreter_synchronous(thread, constructor,
+                                   (stack_value[]){{.obj = socket_address->obj}, {.obj = address->obj}, {.i = port}});
+      if (!thread->current_exception)
+        result = socket_address->obj;
+    }
+    drop_handle(thread, socket_address);
+  }
+  drop_handle(thread, address);
+  return result;
 }
 
 static bool socket_address(
@@ -322,7 +366,7 @@ DECLARE_NATIVE("sun/nio/ch", Net, localInetAddress,
   if (!socket_address(
           thread, args[0].handle, false, host, sizeof(host), &port))
     return value_null();
-  return (stack_value){.obj = make_inet4_address(thread, host)};
+  return inet4_address_value(thread, host);
 }
 
 DECLARE_NATIVE("sun/nio/ch", Net, remotePort,
@@ -342,7 +386,7 @@ DECLARE_NATIVE("sun/nio/ch", Net, remoteInetAddress,
   if (!socket_address(
           thread, args[0].handle, true, host, sizeof(host), &port))
     return value_null();
-  return (stack_value){.obj = make_inet4_address(thread, host)};
+  return inet4_address_value(thread, host);
 }
 
 DECLARE_NATIVE("sun/nio/ch", Net, getIntOption0,

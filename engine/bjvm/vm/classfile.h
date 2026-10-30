@@ -263,6 +263,9 @@ typedef enum : u8 {
   insn_cos, // (F)F, (D)D
   insn_tan, // (F)F, (D)D
   insn_sqrt, // (F)F, (D)D
+  insn_exp, // (D)D (Shiklo fork, 2026-10-30)
+  insn_log, // (D)D
+  insn_log10, // (D)D
 
   /** default-off Java-library hot-path experiment */
   insn_hot_aot, // generated build-time AOT for a resolved static call
@@ -929,6 +932,7 @@ typedef struct classdesc {
   module *module;
   classloader *classloader; // class loader which defined this class
   void *linkage_error;
+  bool initialization_failed; // its <clinit> threw: later uses throw NoClassDefFoundError (JVMS 5.5 step 5)
 
   vtable vtable;
   itables itables;
