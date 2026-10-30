@@ -6,24 +6,23 @@ Diagnostics carry javac's own text: the rich formatter's message (simple class n
 clauses), the lint category ("[rawtypes] "), and mandatory warnings as warnings.
 
 diff --git a/compiler/src/main/java/org/teavm/javac/Compiler.java b/compiler/src/main/java/org/teavm/javac/Compiler.java
-index 39c5b42..9313b21 100644
+index 39c5b42..ce98efe 100644
 --- a/compiler/src/main/java/org/teavm/javac/Compiler.java
 +++ b/compiler/src/main/java/org/teavm/javac/Compiler.java
-@@ -18,6 +18,13 @@ package org.teavm.javac;
+@@ -18,6 +18,12 @@ package org.teavm.javac;
  
  import com.sun.tools.javac.main.JavaCompiler;
  import com.sun.tools.javac.util.Context;
 +import com.sun.tools.javac.util.JCDiagnostic;
 +import com.sun.tools.javac.util.Log;
 +import com.sun.tools.javac.util.Options;
-+import com.sun.tools.javac.util.RichDiagnosticFormatter;
 +import java.util.Locale;
 +import javax.tools.Diagnostic;
 +import org.teavm.jso.JSProperty;
  import java.io.ByteArrayInputStream;
  import java.io.ByteArrayOutputStream;
  import java.io.IOException;
-@@ -65,10 +72,22 @@ public final class Compiler {
+@@ -65,10 +71,22 @@ public final class Compiler {
      private List<DiagnosticListenerRegistration> diagnosticListeners = new ArrayList<>();
      private ResourceProvider resourceProvider;
      private ClassHolderSource classSource;
@@ -46,7 +45,7 @@ index 39c5b42..9313b21 100644
      @JSExport
      public void addSourceFile(String name, String content) {
          addFile(sourceFiles, name, content.getBytes(StandardCharsets.UTF_8));
-@@ -320,13 +339,87 @@ public final class Compiler {
+@@ -320,13 +338,85 @@ public final class Compiler {
              return;
          }
          var context = new Context();
@@ -64,8 +63,6 @@ index 39c5b42..9313b21 100644
 +            putOption(javacOptions, option);
 +        }
          compiler = new SimpleJavaCompiler(context);
-+        // As javac's own task does: messages with simple class names and "where T is a type-variable" clauses.
-+        RichDiagnosticFormatter.instance(context);
          compiler.prepare();
      }
  
@@ -135,7 +132,7 @@ index 39c5b42..9313b21 100644
      private class SimpleJavaCompiler extends JavaCompiler {
          SimpleJavaCompiler(Context context) {
              super(context);
-@@ -346,6 +439,9 @@ public final class Compiler {
+@@ -346,6 +436,9 @@ public final class Compiler {
              var units = stopIfError(CompileState.ENTER, parseFiles(files));
              enterTrees(stopIfError(CompileState.ENTER, initModules(units)));
              generate(desugar(flow(attribute(todo))));

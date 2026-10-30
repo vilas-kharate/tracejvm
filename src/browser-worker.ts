@@ -31,7 +31,15 @@ function post(message: TraceJVMWorkerResponse, transfer: Transferable[] = []): v
 }
 
 function describeThrowable(error: unknown): string {
-  if (error instanceof Error) return error.stack ?? error.message;
+  // A tagged error sets its message after its stack was taken, so the stack alone can lack it (Shiklo fork,
+  // 2026-10-30: a compile failure arrived as "TraceJVMOperationError at catch ..." without its cause).
+  if (error instanceof Error) {
+    const stack = error.stack ?? "";
+    if (error.message && !stack.includes(error.message)) {
+      return `${error.name}: ${error.message}\n${stack}`;
+    }
+    return stack || error.message;
+  }
   try {
     return String(error);
   } catch {
