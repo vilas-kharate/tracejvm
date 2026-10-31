@@ -11,9 +11,8 @@
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "WebWorker"],
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@b-jvm/bjvm2": ["engine/bjvm/js/bjvm2.ts"]
+      "@b-jvm/bjvm2": ["./engine/bjvm/js/bjvm2.ts"]
     }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "compatibility/**/*.ts"]
