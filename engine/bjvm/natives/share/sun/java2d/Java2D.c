@@ -12,7 +12,13 @@ DECLARE_NATIVE("sun/java2d/loops", GraphicsPrimitiveMgr, registerNativeLoops, "(
 
 // void BufImgSurfaceData.initRaster(Object theArray, int offset, int bitoffset, int width, int height, int pixStr,
 // int scanStr, IndexColorModel icm): the native loops' view of the pixels, not needed by the Java loops.
-DECLARE_NATIVE("sun/java2d", BufImgSurfaceData, initRaster,
+DECLARE_NATIVE("sun/awt/image", BufImgSurfaceData, initRaster,
                "(Ljava/lang/Object;IIIIIILjava/awt/image/IndexColorModel;)V") {
   return value_null();
+}
+
+// boolean ImagingLib.init(): false, no native imaging library, so AffineTransformOp, ConvolveOp and LookupOp filter
+// in Java.
+DECLARE_NATIVE("sun/awt/image", ImagingLib, init, "()Z") {
+  return (stack_value){.i = 0};
 }

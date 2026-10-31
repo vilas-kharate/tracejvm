@@ -177,6 +177,8 @@ THIRD_PARTY_NOTICES.md).
 - 2026-10-31: Java 2D on a BufferedImage with the Java loops: every static native `initIDs(…)` without a native does
   nothing (Java 2D's take classes), `GraphicsPrimitiveMgr.registerNativeLoops` and `BufImgSurfaceData.initRaster` do
   nothing (`natives/share/sun/java2d/Java2D.c`, new): Graphics2D.fillRect, drawLine … threw UnsatisfiedLinkError.
+  After build 26: `BufImgSurfaceData` is in `sun.awt.image` (the native was declared in the wrong package), and
+  `ImagingLib.init()` is false, so the image filters (AffineTransformOp, ConvolveOp, LookupOp) run their Java code.
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their
