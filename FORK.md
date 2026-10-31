@@ -238,3 +238,7 @@ THIRD_PARTY_NOTICES.md).
   `java -ea` is for the launcher (`ClassLoader.setDefaultAssertionStatus`, which works from 2026-10-30).
 - 2026-10-28: `Class.getModifiers()` of a member class comes from its InnerClasses entry (so `static`, `private`,
   `protected` show), and ACC_SUPER is no longer reported (`natives/share/java/lang/Class.c`).
+- 2026-10-31 (after build 27): a javac note about the whole compilation has no file ("Some messages have been
+  simplified; recompile with -Xdiags:verbose to get full output", after a shortened "no suitable method" error such as
+  `ArrayList<String>.add(42)`): TeaVM's JavaDiagnostic.getFileName dereferenced its null source, and javac stopped with
+  "dereferencing a null pointer". Patch 0005's diagnostic gives no file name for it.

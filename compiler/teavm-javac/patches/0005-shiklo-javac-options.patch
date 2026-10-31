@@ -6,7 +6,7 @@ Diagnostics carry javac's own text: the rich formatter's message (simple class n
 clauses), the lint category ("[rawtypes] "), and mandatory warnings as warnings.
 
 diff --git a/compiler/src/main/java/org/teavm/javac/Compiler.java b/compiler/src/main/java/org/teavm/javac/Compiler.java
-index 39c5b42..99f43a6 100644
+index 39c5b42..9a58a50 100644
 --- a/compiler/src/main/java/org/teavm/javac/Compiler.java
 +++ b/compiler/src/main/java/org/teavm/javac/Compiler.java
 @@ -16,8 +16,17 @@
@@ -50,7 +50,7 @@ index 39c5b42..99f43a6 100644
      @JSExport
      public void addSourceFile(String name, String content) {
          addFile(sourceFiles, name, content.getBytes(StandardCharsets.UTF_8));
-@@ -320,13 +341,91 @@ public final class Compiler {
+@@ -320,13 +341,100 @@ public final class Compiler {
              return;
          }
          var context = new Context();
@@ -127,6 +127,15 @@ index 39c5b42..99f43a6 100644
 +            return diagnostic.getKind() == Diagnostic.Kind.MANDATORY_WARNING ? "warning" : super.getSeverity();
 +        }
 +
++        // A note about the whole compilation has no file ("Some messages have been simplified; recompile with
++        // -Xdiags:verbose to get full output", after a shortened "no suitable method" error): getSource() is null.
++        @Override
++        @JSExport
++        @JSProperty
++        public String getFileName() {
++            return diagnostic.getSource() == null ? null : super.getFileName();
++        }
++
 +        @Override
 +        @JSExport
 +        @JSProperty
@@ -143,7 +152,7 @@ index 39c5b42..99f43a6 100644
      private class SimpleJavaCompiler extends JavaCompiler {
          SimpleJavaCompiler(Context context) {
              super(context);
-@@ -346,6 +445,9 @@ public final class Compiler {
+@@ -346,6 +454,9 @@ public final class Compiler {
              var units = stopIfError(CompileState.ENTER, parseFiles(files));
              enterTrees(stopIfError(CompileState.ENTER, initModules(units)));
              generate(desugar(flow(attribute(todo))));
