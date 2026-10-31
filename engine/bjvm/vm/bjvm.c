@@ -1555,13 +1555,16 @@ classdesc *define_class(vm_thread *thread, classloader *cl, slice chars, const u
     done:
     }
   }
-  // A JDK class's "private static native void initIDs()" only caches JNI field and method IDs for its other natives,
-  // which this VM does not use: one with no native of its own does nothing (Shiklo fork, 2026-10-30; java.awt's
-  // Toolkit, Color, ColorModel, Raster, BufferedImage … threw UnsatisfiedLinkError from their static initializers).
+  // A JDK class's "private static native void initIDs(…)" only caches JNI field and method IDs (of the classes it is
+  // given, if any) for its other natives, which this VM does not use: one with no native of its own does nothing
+  // (Shiklo fork, 2026-10-30; java.awt's Toolkit, Color, ColorModel, Raster, BufferedImage, Java 2D's pipes … threw
+  // UnsatisfiedLinkError from their static initializers).
   for (int j = 0; j < class->methods_count; ++j) {
     cp_method *method = class->methods + j;
+    slice desc = method->unparsed_descriptor;
     if (!method->native_handle && (method->access_flags & ACCESS_NATIVE) && (method->access_flags & ACCESS_STATIC) &&
-        utf8_equals(method->name, "initIDs") && utf8_equals(method->unparsed_descriptor, "()V"))
+        utf8_equals(method->name, "initIDs") && desc.len >= 3 && desc.chars[desc.len - 1] == 'V' &&
+        desc.chars[desc.len - 2] == ')')
       method->native_handle = &init_ids_native;
   }
 

@@ -167,6 +167,16 @@ THIRD_PARTY_NOTICES.md).
 - 2026-10-31: javac's diagnostics are formatted with `format`, not `formatMessage` (patch 0005), with javac's basic
   formatter set to "%L%m" and no source line: each starts afresh (the type variables of the one before showed as
   "ArrayList<E#2>") and keeps its "where E is a type-variable" clauses.
+- 2026-10-31 (after build 25): a poll's answer is given back with the JVM's descriptor numbers (`engine/bjvm/js/bjvm2.ts`
+  `applyDescriptorResponse`): the router translated the request's descriptors to the host's but not the answer's,
+  so a selector matched no ready descriptor whenever the host numbered its descriptors differently from the JVM
+  (a host numbering across runs): HttpServer never accepted a connection in a JVM's second program.
+- 2026-10-31: file permissions and times: `UnixFileSystem.checkAccess0` (it was always true: a missing file could be
+  read), `setPermission0`, `setReadOnly0`, `setLastModifiedTime0` (always false), through two new host operations,
+  `posix.chmod {path, options: {mode}}` and `posix.utimes {path, modifiedAt}` (`natives/emscripten/tracejvm-host.c`).
+- 2026-10-31: Java 2D on a BufferedImage with the Java loops: every static native `initIDs(…)` without a native does
+  nothing (Java 2D's take classes), `GraphicsPrimitiveMgr.registerNativeLoops` and `BufImgSurfaceData.initRaster` do
+  nothing (`natives/share/sun/java2d/Java2D.c`, new): Graphics2D.fillRect, drawLine … threw UnsatisfiedLinkError.
 - 2026-10-29 (after build 16, 36/38): dynamic constants (`CONSTANT_Dynamic`) as bootstrap arguments (`vm/bjvm.c`,
   `vm/classfile.c`). javac makes them for pattern switches (a record pattern with primitive components under a
   guard: `ConstantBootstraps.primitiveClass`; enum labels: EnumDesc constants); they were never linked to their

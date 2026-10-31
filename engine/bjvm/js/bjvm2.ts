@@ -225,6 +225,22 @@ export class RuntimeHostRouter {
         const result = isRecord(response) ? response : undefined;
         if (!result) return response;
 
+        // A poll's answer names the host's descriptors, as its request was translated to: give them back as the JVM's
+        // (Shiklo fork, 2026-10-31). The JVM matches the ready entries by its own numbers, so a selector saw none
+        // ("unknown descriptor") whenever the host's numbers were not the same as the JVM's: HttpServer never
+        // accepted a connection in a JVM's second program.
+        if (operation === "poll" && Array.isArray(result.entries)) {
+            const jvmDescriptor = new Map<number, number>();
+            for (const [token, hostFd] of context.descriptors) jvmDescriptor.set(hostFd, token);
+            return {
+                ...result,
+                entries: result.entries.map((entry: unknown) =>
+                    isRecord(entry) && typeof entry.fd === "number" && jvmDescriptor.has(entry.fd)
+                        ? {...entry, fd: jvmDescriptor.get(entry.fd)}
+                        : entry),
+            };
+        }
+
         const register = (values: unknown[]): number[] => {
             const raw = values.map((value) => {
                 if (!Number.isSafeInteger(value) || (value as number) < 0) {

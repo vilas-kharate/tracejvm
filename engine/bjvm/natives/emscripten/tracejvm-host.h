@@ -44,6 +44,8 @@ int tracejvm_host_stat(
 int tracejvm_host_mkdir(char const *path, mode_t mode);
 int tracejvm_host_rmdir(char const *path);
 int tracejvm_host_unlink(char const *path);
+int tracejvm_host_chmod(char const *path, mode_t mode);
+int tracejvm_host_utimes(char const *path, double modified_ms);
 int tracejvm_host_link(char const *existing_path, char const *new_path);
 int tracejvm_host_symlink(char const *target, char const *link_path);
 ssize_t tracejvm_host_readlink(

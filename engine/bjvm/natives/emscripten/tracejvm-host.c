@@ -623,7 +623,7 @@ EM_JS(int, tracejvm_host_path_call_js,
   try {
     const op = UTF8ToString(operation);
     const payload = {path: UTF8ToString(path)};
-    if (op === "mkdir") payload.options = {mode};
+    if (op === "mkdir" || op === "chmod") payload.options = {mode};
     Module["traceJVMHostDispatchSync"]({
       service: "posix",
       operation: op,
@@ -658,6 +658,37 @@ int tracejvm_host_unlink(char const *path) {
   return tracejvm_host_routes_path(path)
       ? host_path_call("unlink", path, 0)
       : unlink(path);
+}
+
+// A file's permission bits and modification time (Shiklo fork, 2026-10-31: File.setReadOnly, setWritable,
+// setLastModified and Files.setPosixFilePermissions had nothing to call): posix.chmod {path, options: {mode}} and
+// posix.utimes {path, modifiedAt} (milliseconds since 1970).
+int tracejvm_host_chmod(char const *path, mode_t mode) {
+  return tracejvm_host_routes_path(path)
+      ? host_path_call("chmod", path, (int)(mode & 07777))
+      : chmod(path, mode);
+}
+
+EM_JS(int, tracejvm_host_utimes_js, (char const *path, double modified_ms), {
+  try {
+    Module["traceJVMHostDispatchSync"]({
+      service: "posix",
+      operation: "utimes",
+      payload: {path: UTF8ToString(path), modifiedAt: modified_ms},
+    });
+    return 0;
+  } catch (error) {
+    Module["traceJVMHostLastError"] = error;
+    return -1;
+  }
+});
+
+int tracejvm_host_utimes(char const *path, double modified_ms) {
+  if (!tracejvm_host_routes_path(path)) { // the runtime's own files
+    errno = EROFS;
+    return -1;
+  }
+  return tracejvm_host_utimes_js(path, modified_ms) < 0 ? fail_from_host() : 0;
 }
 
 EM_JS(int, tracejvm_host_two_path_call_js,

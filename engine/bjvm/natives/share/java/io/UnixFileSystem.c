@@ -14,7 +14,68 @@
 
 DECLARE_NATIVE("java/io", UnixFileSystem, initIDs, "()V") { return value_null(); }
 
-DECLARE_NATIVE("java/io", UnixFileSystem, checkAccess0, "(Ljava/io/File;I)Z") { return (stack_value){.i = 1}; }
+// ---- Permissions and times (Shiklo fork, 2026-10-31), as the JDK's UnixFileSystem_md.c: checkAccess0 was always true
+// (a missing file could be read), the setters always false. access is FileSystem.ACCESS_READ (4), ACCESS_WRITE (2) or
+// ACCESS_EXECUTE (1); the page's files have one user, so the owner's bits decide.
+
+// The file's mode, or -1 when it has none (missing, or out of memory).
+static int file_mode(vm_thread *thread, obj_header *file, heap_string *path) {
+  obj_header *path_obj = file ? LoadFieldObject(file, "java/lang/String", "path") : nullptr;
+  if (!path_obj)
+    return -1;
+  *path = AsHeapString(path_obj, on_oom);
+  struct stat st;
+  if (tracejvm_host_stat(path->chars, &st, true) != 0) {
+    free_heap_str(*path);
+    return -1;
+  }
+  return (int)st.st_mode;
+on_oom:
+  return -1;
+}
+
+DECLARE_NATIVE("java/io", UnixFileSystem, checkAccess0, "(Ljava/io/File;I)Z") {
+  heap_string path;
+  int mode = file_mode(thread, args[0].handle->obj, &path);
+  if (mode < 0)
+    return (stack_value){.i = 0};
+  free_heap_str(path);
+  return (stack_value){.i = (mode & (args[1].i << 6)) != 0};
+}
+
+// File f, int access, boolean enable, boolean owneronly
+DECLARE_NATIVE("java/io", UnixFileSystem, setPermission0, "(Ljava/io/File;IZZ)Z") {
+  heap_string path;
+  int mode = file_mode(thread, args[0].handle->obj, &path);
+  if (mode < 0)
+    return (stack_value){.i = 0};
+  int bits = args[3].i ? args[1].i << 6 : (args[1].i << 6) | (args[1].i << 3) | args[1].i;
+  mode = args[2].i ? mode | bits : mode & ~bits;
+  bool ok = tracejvm_host_chmod(path.chars, (mode_t)(mode & 07777)) == 0;
+  free_heap_str(path);
+  return (stack_value){.i = ok};
+}
+
+// File f, long time
+DECLARE_NATIVE("java/io", UnixFileSystem, setLastModifiedTime0, "(Ljava/io/File;J)Z") {
+  heap_string path;
+  if (file_mode(thread, args[0].handle->obj, &path) < 0)
+    return (stack_value){.i = 0};
+  bool ok = tracejvm_host_utimes(path.chars, (double)args[1].l) == 0;
+  free_heap_str(path);
+  return (stack_value){.i = ok};
+}
+
+// File f
+DECLARE_NATIVE("java/io", UnixFileSystem, setReadOnly0, "(Ljava/io/File;)Z") {
+  heap_string path;
+  int mode = file_mode(thread, args[0].handle->obj, &path);
+  if (mode < 0)
+    return (stack_value){.i = 0};
+  bool ok = tracejvm_host_chmod(path.chars, (mode_t)(mode & 07777 & ~0222)) == 0;
+  free_heap_str(path);
+  return (stack_value){.i = ok};
+}
 
 DECLARE_NATIVE("java/io", UnixFileSystem, getNameMax0, "(Ljava/lang/String;)J") {
   if (!args[0].handle->obj) {
@@ -261,12 +322,3 @@ DECLARE_NATIVE("java/io", UnixFileSystem, getSpace0, "(Ljava/io/File;I)J") {
   }
   return (stack_value){.l = args[1].i == 0 ? (s64)1 << 30 : (s64)768 << 20};
 }
-
-// File f, int access, boolean enable, boolean owneronly
-DECLARE_NATIVE("java/io", UnixFileSystem, setPermission0, "(Ljava/io/File;IZZ)Z") { return (stack_value){.i = 0}; }
-
-// File f, long time
-DECLARE_NATIVE("java/io", UnixFileSystem, setLastModifiedTime0, "(Ljava/io/File;J)Z") { return (stack_value){.i = 0}; }
-
-// File f
-DECLARE_NATIVE("java/io", UnixFileSystem, setReadOnly0, "(Ljava/io/File;)Z") { return (stack_value){.i = 0}; }
